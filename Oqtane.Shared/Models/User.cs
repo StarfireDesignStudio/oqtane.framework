@@ -30,6 +30,11 @@ namespace Oqtane.Models
         public string Email { get; set; }
 
         /// <summary>
+        /// User time zone
+        /// </summary>
+        public string TimeZoneId { get; set; }
+
+        /// <summary>
         /// Reference to a <see cref="File"/> containing the users photo.
         /// </summary>
         public int? PhotoFileId { get; set; }
@@ -60,14 +65,19 @@ namespace Oqtane.Models
         public DateTime? TwoFactorExpiry { get; set; }
 
         /// <summary>
+        /// A token indicating if a user's security properties have been modified
+        /// </summary>
+        [NotMapped]
+        public string SecurityStamp { get; set; }
+
+        /// <summary>
         /// Reference to the <see cref="Site"/> this user belongs to.
         /// </summary>
         [NotMapped]
         public int SiteId { get; set; }
 
         /// <summary>
-        /// Role names this user has.
-        /// TODO: todoc - is this comma separated?
+        /// Semi-colon delimited list of role names for the user
         /// </summary>
         [NotMapped]
         public string Roles { get; set; }

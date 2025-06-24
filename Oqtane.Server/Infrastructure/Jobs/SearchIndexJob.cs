@@ -59,8 +59,15 @@ namespace Oqtane.Infrastructure
                 var currentTime = DateTime.UtcNow;
                 var lastIndexedOn = Convert.ToDateTime(siteSettings.GetValue(SearchLastIndexedOnSetting, DateTime.MinValue.ToString()));
 
+                if (lastIndexedOn == DateTime.MinValue)
+                {
+                    // reset index
+                    log += $"*Site Index Reset*<br />";
+                    await searchService.DeleteSearchContentsAsync(site.SiteId);
+                }
+
                 var ignorePages = siteSettings.GetValue(SearchIgnorePagesSetting, "").Split(',');
-                var ignoreEntities = siteSettings.GetValue(SearchIgnoreEntitiesSetting, "").Split(',');
+                var ignoreEntities = siteSettings.GetValue(SearchIgnoreEntitiesSetting, "File").Split(',');
 
                 var pages = pageRepository.GetPages(site.SiteId);
                 var pageModules = pageModuleRepository.GetPageModules(site.SiteId);
@@ -186,18 +193,21 @@ namespace Oqtane.Infrastructure
 
             if (string.IsNullOrEmpty(searchContent.Title))
             {
-                searchContent.Title = string.Empty;
-                if (!string.IsNullOrEmpty(pageModule.Title))
-                {
-                    searchContent.Title = pageModule.Title;
-                }
-                else if (pageModule.Page != null)
+                if (pageModule.Page != null)
                 {
                     searchContent.Title = !string.IsNullOrEmpty(pageModule.Page.Title) ? pageModule.Page.Title : pageModule.Page.Name;
                 }
+                else
+                {
+                    searchContent.Title = pageModule.Title;
+                }
             }
 
-            if (searchContent.Description == null) { searchContent.Description = string.Empty;}
+            if (searchContent.Description == null)
+            {
+                searchContent.Description = (searchContent.Title != pageModule.Title) ? pageModule.Title : string.Empty;
+            }
+
             if (searchContent.Body == null) { searchContent.Body = string.Empty; }
 
             if (string.IsNullOrEmpty(searchContent.Url))

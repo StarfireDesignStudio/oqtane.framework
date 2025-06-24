@@ -139,7 +139,7 @@
     <value>Ignore Entities: </value>
   </data>
   <data name="IgnoreEntities.HelpText" xml:space="preserve">
-    <value>Comma delimited list of entities which should be ignored</value>
+    <value>Comma delimited list of entities which should be ignored. By default File entities are ignored.</value>
   </data>
   <data name="MinimumWordLength.Text" xml:space="preserve">
     <value>Word Length: </value>
@@ -154,7 +154,7 @@
     <value>Comma delimited list of words which should be ignored</value>
   </data>
   <data name="Success.Save" xml:space="preserve">
-    <value>Search Settings Saved Successfully</value>
+    <value>Search Settings Saved Successfully. You Will Need Reindex For Your Changes To Be Reflected In The Search Results.</value>
   </data>
   <data name="Error.Save" xml:space="preserve">
     <value>Error Saving Search Settings</value>
@@ -164,5 +164,17 @@
   </data>
   <data name="SearchProvider.Text" xml:space="preserve">
     <value>Search Provider:</value>
+  </data>
+  <data name="Message.Reindex" xml:space="preserve">
+    <value>The search index will be rebuilt for this site. Please be patient during the reindexing process.</value>
+  </data>
+  <data name="Reindex.Text" xml:space="preserve">
+    <value>Reindex</value>
+  </data>
+  <data name="Reindex.Header" xml:space="preserve">
+    <value>Reindex</value>
+  </data>
+  <data name="Reindex.Message" xml:space="preserve">
+    <value>Are You Sure You Wish To Reindex Search Content?</value>
   </data>
 </root>

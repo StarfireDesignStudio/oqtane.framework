@@ -3,22 +3,23 @@
 @inherits ModuleBase
 @inject NavigationManager NavigationManager
 @inject IUserService UserService
+@inject ITimeZoneService TimeZoneService
 @inject IStringLocalizer<Index> Localizer
 @inject IStringLocalizer<SharedResources> SharedLocalizer
 @inject ISettingService SettingService
 
-@if (PageState.Site.AllowRegistration)
+@if (_initialized)
 {
-    if (!_userCreated)
+    @if (PageState.Site.AllowRegistration)
     {
-        <AuthorizeView Roles="@RoleNames.Registered">
-            <Authorizing>
-                <text>...</text>
-            </Authorizing>
-            <Authorized>
+        if (!_userCreated)
+        {
+            if (PageState.User != null)
+            {
                 <ModuleMessage Message="@Localizer["Info.Registration.Exists"]" Type="MessageType.Info" />
-            </Authorized>
-            <NotAuthorized>
+            }
+            else
+            {
                 <ModuleMessage Message="@_passwordrequirements" Type="MessageType.Info" />
                 <form @ref="form" class="@(validated ? "was-validated" : "needs-validation")" novalidate>
                     <div class="container">
@@ -58,26 +59,42 @@
                                 <input id="displayname" class="form-control" @bind="@_displayname" maxlength="50" />
                             </div>
                         </div>
+                        <div class="row mb-1 align-items-center">
+                            <Label Class="col-sm-3" For="timezone" HelpText="Your time zone" ResourceKey="TimeZone">Time Zone:</Label>
+                            <div class="col-sm-9">
+                                <select id="timezone" class="form-select" @bind="@_timezoneid">
+                                    <option value="">&lt;@SharedLocalizer["Not Specified"]&gt;</option>
+                                    @foreach (var timezone in _timezones)
+                                    {
+                                        <option value="@timezone.Id">@timezone.DisplayName</option>
+                                    }
+                                </select>
+                            </div>
+                        </div>
                     </div>
                     <br />
                     <button type="button" class="btn btn-primary" @onclick="Register">@Localizer["Register"]</button>
                     <button type="button" class="btn btn-secondary" @onclick="Cancel">@SharedLocalizer["Cancel"]</button>
                     @if (_allowsitelogin)
                     {
-                        <br /><br />
+                        <br />
+
+                        <br />
                         <NavLink href="@NavigateUrl("login")">@Localizer["Login"]</NavLink>
                     }
                 </form>
-            </NotAuthorized>
-        </AuthorizeView>
-    }    
-}
-else
-{
-    <ModuleMessage Message="@Localizer["Info.Registration.Disabled"]" Type="MessageType.Info" />
+            }
+        }
+    }
+    else
+    {
+        <ModuleMessage Message="@Localizer["Info.Registration.Disabled"]" Type="MessageType.Info" />
+    }
 }
 
 @code {
+    private bool _initialized = false;
+    private List<Models.TimeZone> _timezones;
     private string _passwordrequirements;
     private string _username = string.Empty;
     private ElementReference form;
@@ -88,6 +105,7 @@ else
     private string _confirm = string.Empty;
     private string _email = string.Empty;
     private string _displayname = string.Empty;
+    private string _timezoneid = string.Empty;
     private bool _userCreated = false;
     private bool _allowsitelogin = true;
 
@@ -97,6 +115,9 @@ else
     {
         _passwordrequirements = await UserService.GetPasswordRequirementsAsync(PageState.Site.SiteId); 
         _allowsitelogin = bool.Parse(SettingService.GetSetting(PageState.Site.Settings, "LoginOptions:AllowSiteLogin", "true"));
+        _timezones = await TimeZoneService.GetTimeZonesAsync();
+        _timezoneid = PageState.Site.TimeZoneId;
+        _initialized = true;
     }
 
     protected override void OnParametersSet()
@@ -125,6 +146,7 @@ else
                             Password = _password,
                             Email = _email,
                             DisplayName = (_displayname == string.Empty ? _username : _displayname),
+                            TimeZoneId = _timezoneid,
 							PhotoFileId = null
                         };
                         user = await UserService.AddUserAsync(user);

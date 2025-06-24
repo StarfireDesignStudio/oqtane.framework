@@ -16,7 +16,7 @@
                     <div class="row mb-1 align-items-center">
                         <Label Class="col-sm-3" For="name" HelpText="Enter the page name" ResourceKey="Name">Name: </Label>
                         <div class="col-sm-9">
-                            <input id="name" class="form-control" @bind="@_name" required />
+                            <input id="name" class="form-control" @bind="@_name" maxlength="50" required />
                         </div>
                     </div>
                     @if (UserSecurity.IsAuthorized(PageState.User, RoleNames.Admin))
@@ -101,13 +101,13 @@
                     <div class="row mb-1 align-items-center">
                         <Label Class="col-sm-3" For="path" HelpText="Optionally enter a url path for this page (ie. home ). If you do not provide a url path, the page name will be used. If the page is intended to be the root path specify '/'." ResourceKey="UrlPath">Url Path: </Label>
                         <div class="col-sm-9">
-                            <input id="path" class="form-control" @bind="@_path" />
+                            <input id="path" class="form-control" @bind="@_path" maxlength="256" />
                         </div>
                     </div>
                     <div class="row mb-1 align-items-center">
                         <Label Class="col-sm-3" For="url" HelpText="Optionally enter a url which this page should redirect to when a user navigates to it" ResourceKey="Redirect">Redirect: </Label>
                         <div class="col-sm-9">
-                            <input id="url" class="form-control" @bind="@_url" />
+                            <input id="url" class="form-control" @bind="@_url" maxlength="500" />
                         </div>
                     </div>
                     <div class="row mb-1 align-items-center">
@@ -147,7 +147,7 @@
                         <div class="row mb-1 align-items-center">
                             <Label Class="col-sm-3" For="title" HelpText="Optionally enter the page title. If you do not provide a page title, the page name will be used." ResourceKey="Title">Title: </Label>
                             <div class="col-sm-9">
-                                <input id="title" class="form-control" @bind="@_title" />
+                                <input id="title" class="form-control" @bind="@_title" maxlength="200" />
                             </div>
                         </div>
                         <div class="row mb-1 align-items-center">
@@ -156,7 +156,14 @@
                                 <select id="theme" class="form-select" value="@_themetype" @onchange="(e => ThemeChanged(e))" required>
                                     @foreach (var theme in _themes)
                                     {
-                                        <option value="@theme.TypeName">@theme.Name</option>
+                                        @if (theme.TypeName == PageState.Site.DefaultThemeType)
+                                        {
+                                            <option value="@theme.TypeName">*@theme.Name*</option>
+                                        }
+                                        else
+                                        {
+                                            <option value="@theme.TypeName">@theme.Name</option>
+                                        }
                                     }
                                 </select>
                             </div>
@@ -179,13 +186,13 @@
                         <div class="row mb-1 align-items-center">
                             <Label Class="col-sm-3" For="headcontent" HelpText="Optionally enter content to be included in the page head (ie. meta, link, or script tags)" ResourceKey="HeadContent">Head Content: </Label>
                             <div class="col-sm-9">
-                                <textarea id="headcontent" class="form-control" @bind="@_headcontent" rows="3"></textarea>
+                                <textarea id="headcontent" class="form-control" @bind="@_headcontent" rows="3" maxlength="4000"></textarea>
                             </div>
                         </div>
                         <div class="row mb-1 align-items-center">
                             <Label Class="col-sm-3" For="bodycontent" HelpText="Optionally enter content to be included in the page body (ie. script tags)" ResourceKey="BodyContent">Body Content: </Label>
                             <div class="col-sm-9">
-                                <textarea id="bodycontent" class="form-control" @bind="@_bodycontent" rows="3"></textarea>
+                                <textarea id="bodycontent" class="form-control" @bind="@_bodycontent" rows="3" maxlength="4000"></textarea>
                             </div>
                         </div>
                     </div>
@@ -309,10 +316,11 @@
         {
             await logger.LogError(ex, "Error Loading Child Pages For Parent {PageId} {Error}", _parentid, ex.Message);
             AddModuleMessage(Localizer["Error.ChildPage.Load"], MessageType.Error);
+            await ScrollToPageTop();
         }
     }
 
-    private void ThemeChanged(ChangeEventArgs e)
+    private async Task ThemeChanged(ChangeEventArgs e)
     {
         _themetype = (string)e.Value;
         _containers = ThemeService.GetContainerControls(PageState.Site.Themes, _themetype);
@@ -323,6 +331,7 @@
         if (ThemeService.GetTheme(PageState.Site.Themes, _themetype)?.ThemeName != ThemeService.GetTheme(PageState.Site.Themes, PageState.Site.DefaultThemeType)?.ThemeName)
         {
             AddModuleMessage(Localizer["ThemeChanged.Message"], MessageType.Warning);
+            await ScrollToPageTop();
         }
     }
 
@@ -338,6 +347,7 @@
                 if (!Utilities.ValidateEffectiveExpiryDates(_effectivedate, _expirydate))
                 {
                     AddModuleMessage(SharedLocalizer["Message.EffectiveExpiryDateError"], MessageType.Warning);
+                    await ScrollToPageTop();
                     return;
                 }
                 if (!string.IsNullOrEmpty(_themetype) && !string.IsNullOrEmpty(_containertype))
@@ -388,12 +398,14 @@
                     if (_pages.Any(item => item.Path == page.Path))
                     {
                         AddModuleMessage(string.Format(Localizer["Message.Page.Exists"], _path), MessageType.Warning);
+                        await ScrollToPageTop();
                         return;
                     }
 
                     if (page.ParentId == null && Constants.ReservedRoutes.Contains(page.Name.ToLower()))
                     {
                         AddModuleMessage(string.Format(Localizer["Message.Page.Reserved"], page.Name), MessageType.Warning);
+                        await ScrollToPageTop();
                         return;
                     }
 
@@ -461,6 +473,7 @@
                 else
                 {
                     AddModuleMessage(Localizer["Message.Required.PageInfo"], MessageType.Warning);
+                    await ScrollToPageTop();
                 }
 
             }
@@ -468,11 +481,13 @@
             {
                 await logger.LogError(ex, "Error Saving Page {Page} {Error}", page, ex.Message);
                 AddModuleMessage(Localizer["Error.Page.Save"], MessageType.Error);
+                await ScrollToPageTop();
             }
         }
         else
         {
             AddModuleMessage(SharedLocalizer["Message.InfoRequired"], MessageType.Warning);
+            await ScrollToPageTop();
         }
     }
 

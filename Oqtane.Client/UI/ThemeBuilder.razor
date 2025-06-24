@@ -20,6 +20,13 @@
             return;
         }
 
+        // force authenticated user to provide email address (email may be missing if using external login)
+        if (PageState.User != null && PageState.User.IsAuthenticated && string.IsNullOrEmpty(PageState.User.Email) && PageState.Route.PagePath != "profile")
+        {
+            NavigationManager.NavigateTo(Utilities.NavigateUrl(PageState.Alias.Path, "profile", "returnurl=" + WebUtility.UrlEncode(PageState.Route.PathAndQuery)));
+            return;
+        }
+
         // set page title
         if (!string.IsNullOrEmpty(PageState.Page.Title))
         {
@@ -44,7 +51,6 @@
         }
 
         // head content
-        AddHeadContent(headcontent, PageState.Site.HeadContent);
         if (!string.IsNullOrEmpty(PageState.Site.HeadContent))
         {
             headcontent = AddHeadContent(headcontent, PageState.Site.HeadContent);
@@ -66,32 +72,36 @@
     {
         if (!string.IsNullOrEmpty(content))
         {
-            if (PageState.RenderMode == RenderModes.Interactive)
+            var elements = content.Split('<', StringSplitOptions.RemoveEmptyEntries);
+            foreach (var element in elements)
             {
-                // remove scripts
-                var index = content.IndexOf("<script");
-                while (index >= 0)
+                if (PageState.RenderMode == RenderModes.Static || (!element.ToLower().StartsWith("script") && !element.ToLower().StartsWith("/script")))
                 {
-                    content = content.Remove(index, content.IndexOf("</script>") + 9 - index);
-                    index = content.IndexOf("<script");
+                    if (!headcontent.Contains("<" + element) || element.StartsWith("/"))
+                    {
+                        headcontent += "<" + element;
+                    }
                 }
             }
-            headcontent += content + "\n";
+            headcontent += "\n";
         }
         return headcontent;
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        // force authenticated user to provide email address (email may be missing if using external login)
-        if (PageState.User != null && PageState.User.IsAuthenticated && string.IsNullOrEmpty(PageState.User.Email) && PageState.Route.PagePath != "profile")
-        {
-            NavigationManager.NavigateTo(Utilities.NavigateUrl(PageState.Alias.Path, "profile", "returnurl=" + WebUtility.UrlEncode(PageState.Route.PathAndQuery)));
-            return;
-        }
-
         if (!firstRender)
         {
+            // site content
+            if (!string.IsNullOrEmpty(PageState.Site.HeadContent) && PageState.Site.HeadContent.Contains("<script"))
+            {
+                await InjectScripts(PageState.Site.HeadContent, ResourceLocation.Head);
+            }
+            if (!string.IsNullOrEmpty(PageState.Site.BodyContent) && PageState.Site.BodyContent.Contains("<script"))
+            {
+                await InjectScripts(PageState.Site.BodyContent, ResourceLocation.Body);
+            }
+            // page content
             if (!string.IsNullOrEmpty(PageState.Page.HeadContent) && PageState.Page.HeadContent.Contains("<script"))
             {
                 await InjectScripts(PageState.Page.HeadContent, ResourceLocation.Head);
@@ -176,18 +186,17 @@
             if (!string.IsNullOrEmpty(src))
             {
                 src = (src.Contains("://")) ? src : PageState.Alias.BaseUrl + src;
-                scripts.Add(new { href = src, bundle = "", integrity = integrity, crossorigin = crossorigin, es6module = (type == "module"), location = location.ToString().ToLower(), dataAttributes = dataAttributes });
+                scripts.Add(new { href = src, type = type, bundle = "", integrity = integrity, crossorigin = crossorigin, location = location.ToString().ToLower(), dataAttributes = dataAttributes });
             }
             else
             {
-                // inline script must have an id attribute
                 if (id == "")
                 {
                     count += 1;
                     id = $"page{PageState.Page.PageId}-script{count}";
                 }
-                index = script.IndexOf(">") + 1;
-                await interop.IncludeScript(id, "", "", "", "", script.Substring(index, script.IndexOf("</script>") - index), location.ToString().ToLower());
+                var pos = script.IndexOf(">") + 1;
+                await interop.IncludeScript(id, "", "", "", type, script.Substring(pos, script.IndexOf("</script>") - pos), location.ToString().ToLower(), dataAttributes);
             }
             index = content.IndexOf("<script", index + 1);
         }

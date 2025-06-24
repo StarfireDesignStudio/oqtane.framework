@@ -102,6 +102,9 @@ namespace Microsoft.Extensions.DependencyInjection
             services.AddScoped<ISearchResultsService, SearchResultsService>();
             services.AddScoped<ISearchService, SearchService>();
             services.AddScoped<ISearchProvider, DatabaseSearchProvider>();
+            services.AddScoped<IImageService, ImageService>();
+            services.AddScoped<ICookieConsentService, ServerCookieConsentService>();
+            services.AddScoped<ITimeZoneService, TimeZoneService>();
 
             // providers
             services.AddScoped<ITextEditor, Oqtane.Modules.Controls.QuillJSTextEditor>();
@@ -112,8 +115,12 @@ namespace Microsoft.Extensions.DependencyInjection
 
         internal static IServiceCollection AddOqtaneTransientServices(this IServiceCollection services)
         {
-            // repositories
+            // services
             services.AddTransient<ISiteService, ServerSiteService>();
+            services.AddTransient<ILocalizationCookieService, ServerLocalizationCookieService>();
+            services.AddTransient<IOutputCacheService, ServerOutputCacheService>();
+
+            // repositories
             services.AddTransient<IModuleDefinitionRepository, ModuleDefinitionRepository>();
             services.AddTransient<IThemeRepository, ThemeRepository>();
             services.AddTransient<IAliasRepository, AliasRepository>();
@@ -129,7 +136,6 @@ namespace Microsoft.Extensions.DependencyInjection
             services.AddTransient<IPermissionRepository, PermissionRepository>();
             services.AddTransient<ISettingRepository, SettingRepository>();
             services.AddTransient<ILogRepository, LogRepository>();
-            services.AddTransient<ILocalizationManager, LocalizationManager>();
             services.AddTransient<IJobRepository, JobRepository>();
             services.AddTransient<IJobLogRepository, JobLogRepository>();
             services.AddTransient<INotificationRepository, NotificationRepository>();
@@ -152,11 +158,11 @@ namespace Microsoft.Extensions.DependencyInjection
             services.AddTransient<ILogManager, LogManager>();
             services.AddTransient<IUpgradeManager, UpgradeManager>();
             services.AddTransient<IUserManager, UserManager>();
-
-            // obsolete - replaced by ITenantManager
-            services.AddTransient<ITenantResolver, TenantResolver>();
-
+            services.AddTransient<ILocalizationManager, LocalizationManager>();
             services.AddTransient<ITokenReplace, TokenReplace>();
+
+            // obsolete
+            services.AddTransient<ITenantResolver, TenantResolver>(); // replaced by ITenantManager
 
             return services;
         }
@@ -169,6 +175,7 @@ namespace Microsoft.Extensions.DependencyInjection
                 options.Cookie.HttpOnly = true;
                 options.Cookie.SameSite = SameSiteMode.Lax;
                 options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+                options.LoginPath = "/login"; // overrides .NET Identity default of /Account/Login
                 options.Events.OnRedirectToLogin = context =>
                 {
                     context.Response.StatusCode = (int)HttpStatusCode.Forbidden;

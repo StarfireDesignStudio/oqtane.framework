@@ -5,7 +5,8 @@
 @inject NavigationManager NavigationManager
 @inject IPageService PageService
 @inject IPageModuleService PageModuleService
-@inject IThemeService  ThemeService
+@inject IModuleService ModuleService
+@inject IThemeService ThemeService
 @inject ISystemService SystemService
 @inject IStringLocalizer<Edit> Localizer
 @inject IStringLocalizer<SharedResources> SharedLocalizer
@@ -29,16 +30,16 @@
                             <div class="row mb-1 align-items-center">
                                 <Label Class="col-sm-3" For="parent" HelpText="Select the parent for the page in the site hierarchy" ResourceKey="Parent">Parent: </Label>
                                 <div class="col-sm-9">
-                                        <select id="parent" class="form-select" value="@_parentid" @onchange="(e => ParentChanged(e))" required>
-                                            <option value="-1">&lt;@Localizer["SiteRoot"]&gt;</option>
-                                            @foreach (Page page in _pages)
+                                    <select id="parent" class="form-select" value="@_parentid" @onchange="(e => ParentChanged(e))" required>
+                                        <option value="-1">&lt;@Localizer["SiteRoot"]&gt;</option>
+                                        @foreach (Page page in _pages)
+                                        {
+                                            if (UserSecurity.IsAuthorized(PageState.User, PermissionNames.View, page.PermissionList) && page.PageId != _pageId)
                                             {
-                                                if (UserSecurity.IsAuthorized(PageState.User, PermissionNames.View, page.PermissionList) && page.PageId != _pageId)
-                                                {
-                                                    <option value="@(page.PageId)">@(new string('-', page.Level * 2))@(page.Name)</option>
-                                                }
+                                                <option value="@(page.PageId)">@(new string('-', page.Level * 2))@(page.Name)</option>
                                             }
-                                        </select>
+                                        }
+                                    </select>
                                 </div>
                             </div>
                             <div class="row mb-1 align-items-center">
@@ -115,7 +116,7 @@
                             </div>
                         </div>
                         <div class="row mb-1 align-items-center">
-                            <Label Class="col-sm-3" For="path" HelpText="Optionally enter a url path for this page (ie. home ). If you do not provide a url path, the page name will be used. If the page is intended to be the root path specify '/'." ResourceKey="UrlPath">Url Path: </Label>
+                            <Label Class="col-sm-3" For="path" HelpText="Optionally enter a url path for this page (ie. home ). If you do not provide a url path, the page name will be used. Please note that spaces and punctuation will be replaced by a dash. If the page is intended to be the root path specify '/'." ResourceKey="UrlPath">Url Path: </Label>
                             <div class="col-sm-9">
                                 <input id="path" class="form-control" @bind="@_path" maxlength="256" />
                             </div>
@@ -171,7 +172,14 @@
                                     <select id="theme" class="form-select" value="@_themetype" @onchange="(e => ThemeChanged(e))" required>
                                         @foreach (var theme in _themes)
                                         {
-                                            <option value="@theme.TypeName">@theme.Name</option>
+                                            @if (theme.TypeName == PageState.Site.DefaultThemeType)
+                                            {
+                                                <option value="@theme.TypeName">*@theme.Name*</option>
+                                            }
+                                            else
+                                            {
+                                                <option value="@theme.TypeName">@theme.Name</option>
+                                            }
                                         }
                                     </select>
                                 </div>
@@ -197,17 +205,20 @@
                             <div class="row mb-1 align-items-center">
                                 <Label Class="col-sm-3" For="headcontent" HelpText="Optionally enter content to be included in the page head (ie. meta, link, or script tags)" ResourceKey="HeadContent">Head Content: </Label>
                                 <div class="col-sm-9">
-                                    <textarea id="headcontent" class="form-control" @bind="@_headcontent" rows="3"></textarea>
+                                    <textarea id="headcontent" class="form-control" @bind="@_headcontent" rows="3" maxlength="4000"></textarea>
                                 </div>
                             </div>
                             <div class="row mb-1 align-items-center">
                                 <Label Class="col-sm-3" For="bodycontent" HelpText="Optionally enter content to be included in the page body (ie. script tags)" ResourceKey="BodyContent">Body Content: </Label>
                                 <div class="col-sm-9">
-                                    <textarea id="bodycontent" class="form-control" @bind="@_bodycontent" rows="3"></textarea>
+                                    <textarea id="bodycontent" class="form-control" @bind="@_bodycontent" rows="3" maxlength="4000"></textarea>
                                 </div>
                             </div>
                         </div>
                     </Section>
+                    <br />
+                    <button type="button" class="btn btn-success" @onclick="SavePage">@SharedLocalizer["Save"]</button>
+                    <button type="button" class="btn btn-secondary" @onclick="Cancel">@SharedLocalizer["Cancel"]</button>
                     <br />
                     <br />
                     <AuditInfo CreatedBy="@_createdby" CreatedOn="@_createdon" ModifiedBy="@_modifiedby" ModifiedOn="@_modifiedon" DeletedBy="@_deletedby" DeletedOn="@_deletedon"></AuditInfo>
@@ -217,15 +228,28 @@
                         <div class="row mb-1 align-items-center">
                             <PermissionGrid EntityName="@EntityNames.Page" PermissionList="@_permissions" @ref="_permissionGrid" />
                         </div>
+                        <br /><br />
+                        <div class="row mb-1 align-items-center">
+                            <Label Class="col-sm-3" For="updatemodulepermissions" HelpText="Specify if changes made to page permissions should be propagated to the modules on this page" ResourceKey="UpdateModulePermissions">Update Module Permissions? </Label>
+                            <div class="col-sm-9">
+                                <select id="updatemodulepermissions" class="form-select" @bind="@_updatemodulepermissions" required>
+                                    <option value="True">@SharedLocalizer["Yes"]</option>
+                                    <option value="False">@SharedLocalizer["No"]</option>
+                                </select>
+                            </div>
+                        </div>
+                        <br />
+                        <button type="button" class="btn btn-success" @onclick="SavePage">@SharedLocalizer["Save"]</button>
+                        <button type="button" class="btn btn-secondary" @onclick="Cancel">@SharedLocalizer["Cancel"]</button>
                     </div>
                 </TabPanel>
                 <TabPanel Name="PageModules" Heading="Modules" ResourceKey="PageModules">
                     <Pager Items="_pageModules">
                         <Header>
-                        <th style="width: 1px;">&nbsp;</th>
-                        <th style="width: 1px;">&nbsp;</th>
-                        <th>@Localizer["ModuleTitle"]</th>
-                        <th>@Localizer["ModuleDefinition"]</th>
+                            <th style="width: 1px;">&nbsp;</th>
+                            <th style="width: 1px;">&nbsp;</th>
+                            <th>@Localizer["ModuleTitle"]</th>
+                            <th>@Localizer["ModuleDefinition"]</th>
                         </Header>
                         <Row>
                             <td><ActionLink Action="Settings" Text="Edit" Path="@_actualpath" ModuleId="@context.ModuleId" Security="SecurityAccessLevel.Edit" PermissionList="@context.PermissionList" ResourceKey="ModuleSettings" /></td>
@@ -239,8 +263,10 @@
                 {
                     <TabPanel Name="ThemeSettings" Heading="Theme Settings" ResourceKey="ThemeSettings">
                         @_themeSettingsComponent
+                        <br />
+                        <button type="button" class="btn btn-success" @onclick="SavePage">@SharedLocalizer["Save"]</button>
+                        <button type="button" class="btn btn-secondary" @onclick="Cancel">@SharedLocalizer["Cancel"]</button>
                     </TabPanel>
-                    <br />
                 }
             </TabStrip>
         }
@@ -256,12 +282,25 @@
                             </div>
                         </div>
                         <div class="row mb-1 align-items-center">
+                            <Label Class="col-sm-3" For="path" HelpText="Provide a url path for your personalized page. Please note that spaces and punctuation will be replaced by a dash." ResourceKey="PersonalizedUrlPath">Url Path: </Label>
+                            <div class="col-sm-9">
+                                <input id="path" class="form-control" @bind="@_path" maxlength="256" />
+                            </div>
+                        </div>
+                        <div class="row mb-1 align-items-center">
                             <Label Class="col-sm-3" For="theme" HelpText="Select the theme for this page" ResourceKey="Theme">Theme: </Label>
                             <div class="col-sm-9">
                                 <select id="theme" class="form-select" @bind="@_themetype" required>
                                     @foreach (var theme in _themes)
                                     {
-                                        <option value="@theme.TypeName">@theme.Name</option>
+                                        @if (theme.TypeName == PageState.Site.DefaultThemeType)
+                                        {
+                                            <option value="@theme.TypeName">*@theme.Name*</option>
+                                        }
+                                        else
+                                        {
+                                            <option value="@theme.TypeName">@theme.Name</option>
+                                        }
                                     }
                                 </select>
                             </div>
@@ -278,19 +317,21 @@
                             </div>
                         </div>
                     </div>
+                    <br />
+                    <button type="button" class="btn btn-success" @onclick="SavePage">@SharedLocalizer["Save"]</button>
+                    <button type="button" class="btn btn-secondary" @onclick="Cancel">@SharedLocalizer["Cancel"]</button>
                 </TabPanel>
                 @if (_themeSettingsType != null)
                 {
                     <TabPanel Name="ThemeSettings" Heading="Theme Settings" ResourceKey="ThemeSettings">
                         @_themeSettingsComponent
+                        <br />
+                        <button type="button" class="btn btn-success" @onclick="SavePage">@SharedLocalizer["Save"]</button>
+                        <button type="button" class="btn btn-secondary" @onclick="Cancel">@SharedLocalizer["Cancel"]</button>
                     </TabPanel>
-                    <br />
                 }
             </TabStrip>
         }
-        <br />
-        <button type="button" class="btn btn-success" @onclick="SavePage">@SharedLocalizer["Save"]</button>
-        <button type="button" class="btn btn-secondary" @onclick="Cancel">@SharedLocalizer["Cancel"]</button>
     </form>
 }
 
@@ -327,6 +368,7 @@
     private string _bodycontent;
     private List<Permission> _permissions = null;
     private PermissionGrid _permissionGrid;
+    private string _updatemodulepermissions;
     private List<Module> _pageModules;
     private string _createdby;
     private DateTime _createdon;
@@ -415,9 +457,11 @@
 
                 // permissions
                 _permissions = _page.PermissionList;
+                _updatemodulepermissions = "True";
 
                 // page modules
-                _pageModules = PageState.Modules;
+                var modules = await ModuleService.GetModulesAsync(PageState.Site.SiteId);
+                _pageModules = modules.Where(item => item.PageId == _page.PageId && !item.IsDeleted).ToList();
 
                 // audit
                 _createdby = _page.CreatedBy;
@@ -450,7 +494,7 @@
             _parentid = (string)e.Value;
             _children = new List<Page>();
             foreach (Page p in _pages.Where(item => (_parentid == "-1" && item.ParentId == null) || (item.ParentId == int.Parse(_parentid))))
-        {
+            {
                 if (p.PageId != _pageId && UserSecurity.IsAuthorized(PageState.User, PermissionNames.View, p.PermissionList))
                 {
                     _children.Add(p);
@@ -463,10 +507,11 @@
         {
             await logger.LogError(ex, "Error Loading Child Pages For Parent {PageId} {Error}", _parentid, ex.Message);
             AddModuleMessage(Localizer["Error.ChildPage.Load"], MessageType.Error);
+            await ScrollToPageTop();
         }
     }
 
-    private void ThemeChanged(ChangeEventArgs e)
+    private async Task ThemeChanged(ChangeEventArgs e)
     {
         _themetype = (string)e.Value;
         _containers = ThemeService.GetContainerControls(PageState.Site.Themes, _themetype);
@@ -478,6 +523,7 @@
         if (ThemeService.GetTheme(PageState.Site.Themes, _themetype)?.ThemeName != ThemeService.GetTheme(PageState.Site.Themes, PageState.Site.DefaultThemeType)?.ThemeName)
         {
             AddModuleMessage(Localizer["ThemeChanged.Message"], MessageType.Warning);
+            await ScrollToPageTop();
         }
     }
 
@@ -515,6 +561,7 @@
                 if (!Utilities.ValidateEffectiveExpiryDates(_effectivedate, _expirydate))
                 {
                     AddModuleMessage(SharedLocalizer["Message.EffectiveExpiryDateError"], MessageType.Warning);
+                    await ScrollToPageTop();
                     return;
                 }
                 if (!string.IsNullOrEmpty(_themetype) && _containertype != "-")
@@ -565,12 +612,14 @@
                     if (_pages.Any(item => item.Path == _page.Path && item.PageId != _page.PageId))
                     {
                         AddModuleMessage(string.Format(Localizer["Mesage.Page.PathExists"], _path), MessageType.Warning);
+                        await ScrollToPageTop();
                         return;
                     }
 
                     if (_page.ParentId == null && Constants.ReservedRoutes.Contains(_page.Name.ToLower()))
                     {
                         AddModuleMessage(string.Format(Localizer["Message.Page.Reserved"], _page.Name), MessageType.Warning);
+                        await ScrollToPageTop();
                         return;
                     }
 
@@ -624,6 +673,7 @@
                     if (_page.UserId == null)
                     {
                         _page.PermissionList = _permissionGrid.GetPermissionList();
+                        _page.UpdateModulePermissions = bool.Parse(_updatemodulepermissions);
                     }
 
                     _page = await PageService.UpdatePageAsync(_page);
@@ -655,17 +705,20 @@
                 else
                 {
                     AddModuleMessage(Localizer["Message.Required.PageInfo"], MessageType.Warning);
+                    await ScrollToPageTop();
                 }
             }
             catch (Exception ex)
             {
                 await logger.LogError(ex, "Error Saving Page {Page} {Error}", _page, ex.Message);
                 AddModuleMessage(Localizer["Error.Page.Save"], MessageType.Error);
+                await ScrollToPageTop();
             }
         }
         else
         {
             AddModuleMessage(SharedLocalizer["Message.InfoRequired"], MessageType.Warning);
+            await ScrollToPageTop();
         }
     }
 

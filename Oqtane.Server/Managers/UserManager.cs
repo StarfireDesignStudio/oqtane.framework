@@ -12,6 +12,7 @@ using Oqtane.Enums;
 using Oqtane.Infrastructure;
 using Oqtane.Models;
 using Oqtane.Repository;
+using Oqtane.Security;
 using Oqtane.Shared;
 
 namespace Oqtane.Managers
@@ -64,6 +65,14 @@ namespace Oqtane.Managers
                 {
                     user.SiteId = siteid;
                     user.Roles = GetUserRoles(user.UserId, user.SiteId);
+                    var identityuser = _identityUserManager.FindByNameAsync(user.Username).GetAwaiter().GetResult();
+                    if (identityuser != null)
+                    {
+                        user.SecurityStamp = identityuser.SecurityStamp;
+                        user.EmailConfirmed = identityuser.EmailConfirmed;
+                    }
+                    user.Settings = _settings.GetSettings(EntityNames.User, user.UserId)
+                        .ToDictionary(setting => setting.SettingName, setting => setting.SettingValue);
                 }
                 return user;
             });
@@ -74,8 +83,7 @@ namespace Oqtane.Managers
             User user = _users.GetUser(username);
             if (user != null)
             {
-                user.SiteId = siteid;
-                user.Roles = GetUserRoles(user.UserId, user.SiteId);
+                user = GetUser(user.UserId, siteid);
             }
             return user;
         }
@@ -85,8 +93,7 @@ namespace Oqtane.Managers
             User user = _users.GetUser(username, email);
             if (user != null)
             {
-                user.SiteId = siteid;
-                user.Roles = GetUserRoles(user.UserId, user.SiteId);
+                user = GetUser(user.UserId, siteid);
             }
             return user;
         }
@@ -144,13 +151,17 @@ namespace Oqtane.Managers
             }
             else
             {
-                var result = await _identitySignInManager.CheckPasswordSignInAsync(identityuser, user.Password, false);
-                succeeded = result.Succeeded;
-                if (!succeeded)
+                succeeded = true;
+                if (!user.IsAuthenticated)
                 {
-                    errors = "Password Not Valid For User";
+                    var result = await _identitySignInManager.CheckPasswordSignInAsync(identityuser, user.Password, false);
+                    succeeded = result.Succeeded;
+                    if (!succeeded)
+                    {
+                        errors = "Password Not Valid For User";
+                    }
+                    user.EmailConfirmed = succeeded;
                 }
-                user.EmailConfirmed = succeeded;
             }
 
             if (succeeded)
@@ -226,6 +237,7 @@ namespace Oqtane.Managers
                     {
                         identityuser.PasswordHash = _identityUserManager.PasswordHasher.HashPassword(identityuser, user.Password);
                         await _identityUserManager.UpdateAsync(identityuser);
+                        await _identityUserManager.UpdateSecurityStampAsync(identityuser); // will force user to sign in again
                     }
                     else
                     {
@@ -236,29 +248,37 @@ namespace Oqtane.Managers
 
                 if (user.Email != identityuser.Email)
                 {
-                    await _identityUserManager.SetEmailAsync(identityuser, user.Email);
-
-                    // if email address changed and it is not confirmed, verification is required for new email address
-                    if (!user.EmailConfirmed)
-                    {
-                        string token = await _identityUserManager.GenerateEmailConfirmationTokenAsync(identityuser);
-                        string url = alias.Protocol + alias.Name + "/login?name=" + user.Username + "&token=" + WebUtility.UrlEncode(token);
-                        string body = "Dear " + user.DisplayName + ",\n\nIn Order To Verify The Email Address Associated To Your User Account Please Click The Link Displayed Below:\n\n" + url + "\n\nThank You!";
-                        var notification = new Notification(user.SiteId, user, "User Account Verification", body);
-                        _notifications.AddNotification(notification);
-                    }
+                    identityuser.Email = user.Email;
+                    await _identityUserManager.UpdateAsync(identityuser); // security stamp not updated
                 }
 
                 if (user.EmailConfirmed)
                 {
-                    var emailConfirmationToken = await _identityUserManager.GenerateEmailConfirmationTokenAsync(identityuser);
-                    await _identityUserManager.ConfirmEmailAsync(identityuser, emailConfirmationToken);
+                    if (!identityuser.EmailConfirmed)
+                    {
+                        var emailConfirmationToken = await _identityUserManager.GenerateEmailConfirmationTokenAsync(identityuser);
+                        await _identityUserManager.ConfirmEmailAsync(identityuser, emailConfirmationToken);
+
+                        string body = "Dear " + user.DisplayName + ",\n\nThe Email Address For Your User Account Has Been Verified. You Can Now Login With Your Username And Password.";
+                        var notification = new Notification(user.SiteId, user, "User Account Verification", body);
+                        _notifications.AddNotification(notification);
+                    }
+                }
+                else
+                {
+                    identityuser.EmailConfirmed = false;
+                    await _identityUserManager.UpdateAsync(identityuser); // security stamp not updated
+
+                    string token = await _identityUserManager.GenerateEmailConfirmationTokenAsync(identityuser);
+                    string url = alias.Protocol + alias.Name + "/login?name=" + user.Username + "&token=" + WebUtility.UrlEncode(token);
+                    string body = "Dear " + user.DisplayName + ",\n\nIn Order To Verify The Email Address Associated To Your User Account Please Click The Link Displayed Below:\n\n" + url + "\n\nThank You!";
+                    var notification = new Notification(user.SiteId, user, "User Account Verification", body);
+                    _notifications.AddNotification(notification);
                 }
 
                 user = _users.UpdateUser(user);
                 _syncManager.AddSyncEvent(_tenantManager.GetAlias(), EntityNames.User, user.UserId, SyncEventActions.Update);
                 _syncManager.AddSyncEvent(_tenantManager.GetAlias(), EntityNames.User, user.UserId, SyncEventActions.Reload);
-                _cache.Remove($"user:{user.UserId}:{alias.SiteKey}");
                 user.Password = ""; // remove sensitive information
                 _logger.Log(LogLevel.Information, this, LogFunction.Update, "User Updated {User}", user);
             }
@@ -333,20 +353,20 @@ namespace Oqtane.Managers
                     user = _users.GetUser(user.Username);
                     if (!user.IsDeleted)
                     {
-                        if (user.TwoFactorRequired)
+                        var alias = _tenantManager.GetAlias();
+                        var twoFactorSetting = _settings.GetSetting(EntityNames.Site, alias.SiteId, "LoginOptions:TwoFactor")?.SettingValue ?? "false";
+                        var twoFactorRequired = twoFactorSetting == "required" || user.TwoFactorRequired;
+                        if (twoFactorRequired)
                         {
                             var token = await _identityUserManager.GenerateTwoFactorTokenAsync(identityuser, "Email");
                             user.TwoFactorCode = token;
                             user.TwoFactorExpiry = DateTime.UtcNow.AddMinutes(10);
                             _users.UpdateUser(user);
-                            var alias = _tenantManager.GetAlias();
-                            string url = alias.Protocol + alias.Name;
                             string siteName = _sites.GetSite(alias.SiteId).Name;
                             string subject = _localizer["TwoFactorEmailSubject"];
                             subject = subject.Replace("[SiteName]", siteName);
                             string body = _localizer["TwoFactorEmailBody"].Value;
                             body = body.Replace("[UserDisplayName]", user.DisplayName);
-                            body = body.Replace("[URL]", url);
                             body = body.Replace("[SiteName]", siteName);
                             body = body.Replace("[Token]", token);
                             var notification = new Notification(alias.SiteId, user, subject, body);
@@ -357,26 +377,36 @@ namespace Oqtane.Managers
                         }
                         else
                         {
-                            user = _users.GetUser(identityuser.UserName);
-                            if (user != null)
+                            if (await _identityUserManager.IsEmailConfirmedAsync(identityuser))
                             {
-                                if (await _identityUserManager.IsEmailConfirmedAsync(identityuser))
+                                user = GetUser(identityuser.UserName, alias.SiteId);
+                                if (user != null)
                                 {
-                                    user.IsAuthenticated = true;
-                                    user.LastLoginOn = DateTime.UtcNow;
-                                    user.LastIPAddress = LastIPAddress;
-                                    _users.UpdateUser(user);
-                                    _logger.Log(LogLevel.Information, this, LogFunction.Security, "User Login Successful {Username}", user.Username);
-
-                                    if (setCookie)
+                                    // ensure user is registered for site
+                                    if (UserSecurity.ContainsRole(user.Roles, RoleNames.Registered))
                                     {
-                                        await _identitySignInManager.SignInAsync(identityuser, isPersistent);
+                                        user.IsAuthenticated = true;
+                                        user.LastLoginOn = DateTime.UtcNow;
+                                        user.LastIPAddress = LastIPAddress;
+                                        _users.UpdateUser(user);
+                                        _logger.Log(LogLevel.Information, this, LogFunction.Security, "User Login Successful For {Username} From IP Address {IPAddress}", user.Username, LastIPAddress);
+
+                                        _syncManager.AddSyncEvent(alias, EntityNames.User, user.UserId, "Login");
+
+                                        if (setCookie)
+                                        {
+                                            await _identitySignInManager.SignInAsync(identityuser, isPersistent);
+                                        }
+                                    }
+                                    else
+                                    {
+                                        _logger.Log(LogLevel.Information, this, LogFunction.Security, "User {Username} Is Not An Active Member Of Site {SiteId}", user.Username, alias.SiteId);
                                     }
                                 }
-                                else
-                                {
-                                    _logger.Log(LogLevel.Information, this, LogFunction.Security, "User Email Address Not Verified {Username}", user.Username);
-                                }
+                            }
+                            else
+                            {
+                                _logger.Log(LogLevel.Information, this, LogFunction.Security, "User Email Address Not Verified {Username}", user.Username);
                             }
                         }
                     }
@@ -412,6 +442,16 @@ namespace Oqtane.Managers
             }
 
             return user;
+        }
+        public async Task LogoutUserEverywhere(User user)
+        {
+            var identityuser = await _identityUserManager.FindByNameAsync(user.Username);
+            if (identityuser != null)
+            {
+                await _identityUserManager.UpdateSecurityStampAsync(identityuser);
+                _syncManager.AddSyncEvent(_tenantManager.GetAlias(), EntityNames.User, user.UserId, SyncEventActions.Update);
+                _syncManager.AddSyncEvent(_tenantManager.GetAlias(), EntityNames.User, user.UserId, SyncEventActions.Reload);
+            }
         }
 
         public async Task<User> VerifyEmail(User user, string token)
@@ -468,9 +508,13 @@ namespace Oqtane.Managers
             IdentityUser identityuser = await _identityUserManager.FindByNameAsync(user.Username);
             if (identityuser != null && !string.IsNullOrEmpty(token))
             {
+                // note that ResetPasswordAsync checks password complexity rules
                 var result = await _identityUserManager.ResetPasswordAsync(identityuser, token, user.Password);
                 if (result.Succeeded)
                 {
+                    user = _users.GetUser(user.Username);
+                    _syncManager.AddSyncEvent(_tenantManager.GetAlias(), EntityNames.User, user.UserId, SyncEventActions.Update);
+                    _syncManager.AddSyncEvent(_tenantManager.GetAlias(), EntityNames.User, user.UserId, SyncEventActions.Reload);
                     _logger.Log(LogLevel.Information, this, LogFunction.Security, "Password Reset For {Username}", user.Username);
                     user.Password = "";
                 }
@@ -493,7 +537,10 @@ namespace Oqtane.Managers
             user = _users.GetUser(user.Username);
             if (user != null)
             {
-                if (user.TwoFactorRequired && user.TwoFactorCode == token && DateTime.UtcNow < user.TwoFactorExpiry)
+                var alias = _tenantManager.GetAlias();
+                var twoFactorSetting = _settings.GetSetting(EntityNames.Site, alias.SiteId, "LoginOptions:TwoFactor")?.SettingValue ?? "false";
+                var twoFactorRequired = twoFactorSetting == "required" || user.TwoFactorRequired;
+                if (twoFactorRequired && user.TwoFactorCode == token && DateTime.UtcNow < user.TwoFactorExpiry)
                 {
                     user.IsAuthenticated = true;
                 }
@@ -521,6 +568,30 @@ namespace Oqtane.Managers
                 }
             }
             return user;
+        }
+
+        public async Task<UserValidateResult> ValidateUser(string username, string email, string password)
+        {
+            var validateResult = new UserValidateResult { Succeeded = true };
+
+            //validate username
+            var allowedChars = _identityUserManager.Options.User.AllowedUserNameCharacters;
+            if (string.IsNullOrWhiteSpace(username) || (!string.IsNullOrEmpty(allowedChars) && username.Any(c => !allowedChars.Contains(c))))
+            {
+                validateResult.Succeeded = false;
+                validateResult.Errors.Add("Message.Username.Invalid", string.Empty);
+            }
+
+            //validate password
+            var passwordValidator = new PasswordValidator<IdentityUser>();
+            var passwordResult = await passwordValidator.ValidateAsync(_identityUserManager, null, password);
+            if (!passwordResult.Succeeded)
+            {
+                validateResult.Succeeded = false;
+                validateResult.Errors.Add("Message.Password.Invalid", string.Empty);
+            }
+
+            return validateResult;
         }
 
         public async Task<bool> ValidatePassword(string password)

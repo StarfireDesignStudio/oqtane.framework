@@ -1,11 +1,14 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Localization;
+using Microsoft.Extensions.Logging;
+using Oqtane.Infrastructure.SiteTemplates;
 using Oqtane.Models;
 using Oqtane.Repository;
 using Oqtane.Shared;
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -17,12 +20,14 @@ namespace Oqtane.Infrastructure
         private readonly IServiceScopeFactory _serviceScopeFactory;
         private readonly IWebHostEnvironment _environment;
         private readonly IConfigManager _configManager;
+        private readonly ILogger<UpgradeManager> _filelogger;
 
-        public UpgradeManager(IServiceScopeFactory serviceScopeFactory, IWebHostEnvironment environment, IConfigManager configManager)
+        public UpgradeManager(IServiceScopeFactory serviceScopeFactory, IWebHostEnvironment environment, IConfigManager configManager, ILogger<UpgradeManager> filelogger)
         {
             _serviceScopeFactory = serviceScopeFactory;
             _environment = environment;
             _configManager = configManager;
+            _filelogger = filelogger;
         }
 
         public void Upgrade(Tenant tenant, string version)
@@ -69,6 +74,12 @@ namespace Oqtane.Infrastructure
                     case "5.2.1":
                         Upgrade_5_2_1(tenant, scope);
                         break;
+                    case "6.1.0":
+                        Upgrade_6_1_0(tenant, scope);
+                        break;
+                    case "6.1.1":
+                        Upgrade_6_1_1(tenant, scope);
+                        break;
                 }
             }
         }
@@ -88,7 +99,7 @@ namespace Oqtane.Infrastructure
                     catch (Exception ex)
                     {
                         // error deleting directory
-                        Debug.WriteLine($"Oqtane Error: Error In 2.0.2 Upgrade Logic - {ex}");
+                        _filelogger.LogError(Utilities.LogMessage(this, $"Oqtane Error: Error In 2.0.2 Upgrade Logic - {ex}"));
                     }
                 }
             }
@@ -106,7 +117,7 @@ namespace Oqtane.Infrastructure
             catch (Exception ex)
             {
                 // error populating guid
-                Debug.WriteLine($"Oqtane Error: Error In 2.0.2 Upgrade Logic - {ex}");
+                _filelogger.LogError(Utilities.LogMessage(this, $"Oqtane Error: Error In 2.0.2 Upgrade Logic - {ex}"));
             }
         }
 
@@ -274,7 +285,7 @@ namespace Oqtane.Infrastructure
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"Oqtane Error: Error In 3.2.0 Upgrade Logic - {ex}");
+                _filelogger.LogError(Utilities.LogMessage(this, $"Oqtane Error: Error In 3.2.0 Upgrade Logic - {ex}"));
             }
         }
 
@@ -310,7 +321,7 @@ namespace Oqtane.Infrastructure
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"Oqtane Error: Error In 3.2.1 Upgrade Logic - {ex}");
+                _filelogger.LogError(Utilities.LogMessage(this, $"Oqtane Error: Error In 3.2.1 Upgrade Logic - {ex}"));
             }
         }
 
@@ -354,7 +365,7 @@ namespace Oqtane.Infrastructure
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"Oqtane Error: Error In 3.3.0 Upgrade Logic - {ex}");
+                _filelogger.LogError(Utilities.LogMessage(this, $"Oqtane Error: Error In 3.3.0 Upgrade Logic - {ex}"));
             }
         }
 
@@ -371,7 +382,7 @@ namespace Oqtane.Infrastructure
                 try
                 {
                     // delete legacy Views assemblies which will cause startup errors due to missing HostModel
-                    // note that the following files will be deleted however the framework has already started up so a restart will be required
+                    // note that the following files will be deleted however the framework has already started up so another restart will be required
                     var binFolder = Path.GetDirectoryName(Assembly.GetEntryAssembly().Location);
                     var filepath = Path.Combine(binFolder, "Oqtane.Server.Views.dll");
                     if (System.IO.File.Exists(filepath)) System.IO.File.Delete(filepath);
@@ -381,7 +392,7 @@ namespace Oqtane.Infrastructure
                 catch (Exception ex)
                 {
                     // error deleting file
-                    Debug.WriteLine($"Oqtane Error: Error In 5.1.0 Upgrade Logic - {ex}");
+                    _filelogger.LogError(Utilities.LogMessage(this, $"Oqtane Error: Error In 5.1.0 Upgrade Logic - {ex}"));
                 }
             }
         }
@@ -441,6 +452,87 @@ namespace Oqtane.Infrastructure
             AddPagesToSites(scope, tenant, pageTemplates);
         }
 
+        private void Upgrade_6_1_0(Tenant tenant, IServiceScope scope)
+        {
+            // remove MySql.EntityFrameworkCore package (replaced by Pomelo.EntityFrameworkCore.MySql)
+            string[] assemblies = {
+                "MySql.EntityFrameworkCore.dll"
+            };
+
+            RemoveAssemblies(tenant, assemblies, "6.1.0");
+        }
+
+        private void Upgrade_6_1_1(Tenant tenant, IServiceScope scope)
+        {
+            var localizer = scope.ServiceProvider.GetRequiredService<IStringLocalizer<AdminSiteTemplate>>();
+
+            var pageTemplates = new List<PageTemplate>
+            {
+                new PageTemplate
+                {
+                    Name = "Privacy",
+                    Parent = "",
+                    Path = "privacy",
+                    Order = 1011,
+                    Icon = Icons.Eye,
+                    IsNavigation = false,
+                    IsPersonalizable = false,
+                    PermissionList = new List<Permission>
+                    {
+                        new Permission(PermissionNames.View, RoleNames.Everyone, true),
+                        new Permission(PermissionNames.View, RoleNames.Admin, true),
+                        new Permission(PermissionNames.Edit, RoleNames.Admin, true)
+                    },
+                    PageTemplateModules = new List<PageTemplateModule>
+                    {
+                        new PageTemplateModule { ModuleDefinitionName = "Oqtane.Modules.HtmlText, Oqtane.Client", Title = "Privacy Policy", Pane = PaneNames.Default,
+                            PermissionList = new List<Permission> {
+                                new Permission(PermissionNames.View, RoleNames.Everyone, true),
+                                new Permission(PermissionNames.View, RoleNames.Admin, true),
+                                new Permission(PermissionNames.Edit, RoleNames.Admin, true)
+                            },
+                            Settings = new List<Setting> {
+                                new Setting { SettingName = "DynamicTokens", SettingValue = "true" }
+                            },
+                            Content = localizer["Privacy"]
+                        }
+                    }
+                },
+                new PageTemplate
+                {
+                    Name = "Terms",
+                    Parent = "",
+                    Path = "terms",
+                    Order = 1013,
+                    Icon = Icons.List,
+                    IsNavigation = false,
+                    IsPersonalizable = false,
+                    PermissionList = new List<Permission>
+                    {
+                        new Permission(PermissionNames.View, RoleNames.Everyone, true),
+                        new Permission(PermissionNames.View, RoleNames.Admin, true),
+                        new Permission(PermissionNames.Edit, RoleNames.Admin, true)
+                    },
+                    PageTemplateModules = new List<PageTemplateModule>
+                    {
+                        new PageTemplateModule { ModuleDefinitionName = "Oqtane.Modules.HtmlText, Oqtane.Client", Title = "Terms of Use", Pane = PaneNames.Default,
+                            PermissionList = new List<Permission> {
+                                new Permission(PermissionNames.View, RoleNames.Everyone, true),
+                                new Permission(PermissionNames.View, RoleNames.Admin, true),
+                                new Permission(PermissionNames.Edit, RoleNames.Admin, true)
+                            },
+                            Settings = new List<Setting> {
+                                new Setting { SettingName = "DynamicTokens", SettingValue = "true" }
+                            },
+                            Content = localizer["Terms"]
+                        }
+                    }
+                }
+            };
+
+            AddPagesToSites(scope, tenant, pageTemplates);
+        }
+
         private void AddPagesToSites(IServiceScope scope, Tenant tenant, List<PageTemplate> pageTemplates)
         {
             var tenants = scope.ServiceProvider.GetRequiredService<ITenantManager>();
@@ -449,6 +541,28 @@ namespace Oqtane.Infrastructure
             {
                 tenants.SetAlias(tenant.TenantId, site.SiteId);
                 sites.CreatePages(site, pageTemplates, null);
+            }
+        }
+
+        private void RemoveAssemblies(Tenant tenant, string[] assemblies, string version)
+        {
+            // in a development environment assemblies cannot be removed as the debugger runs fron /bin folder and locks the files
+            if (tenant.Name == TenantNames.Master && !_environment.IsDevelopment())
+            {
+                foreach (var assembly in assemblies)
+                {
+                    try
+                    {
+                        var binFolder = Path.GetDirectoryName(Assembly.GetEntryAssembly().Location);
+                        var filepath = Path.Combine(binFolder, assembly);
+                        if (System.IO.File.Exists(filepath)) System.IO.File.Delete(filepath);
+                    }
+                    catch (Exception ex)
+                    {
+                        // error deleting asesmbly
+                        _filelogger.LogError(Utilities.LogMessage(this, $"Oqtane Error: {version} Upgrade Error Removing {assembly} - {ex}"));
+                    }
+                }
             }
         }
     }

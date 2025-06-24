@@ -23,8 +23,8 @@ else
         <Row>
             <td>@context.Job.Name</td>
             <td>@DisplayStatus(context.Job.IsExecuting, context.Succeeded)</td>
-            <td>@context.StartDate</td>
-            <td>@context.FinishDate</td>
+            <td>@UtcToLocal(context.StartDate)</td>
+            <td>@UtcToLocal(context.FinishDate)</td>
         </Row>
         <Detail>
             <td colspan="4">@((MarkupString)context.Notes)</td>
@@ -44,14 +44,12 @@ else
 
     private async Task GetJobLogs()
     {
-        _jobLogs = await JobLogService.GetJobLogsAsync();
-
+        var jobId = -1;
         if (PageState.QueryString.ContainsKey("id"))
         {
-            _jobLogs = _jobLogs.Where(item => item.JobId == Int32.Parse(PageState.QueryString["id"])).ToList();
+            jobId = int.Parse(PageState.QueryString["id"]);
         }
-
-        _jobLogs = _jobLogs.OrderByDescending(item => item.JobLogId).ToList();
+        _jobLogs = await JobLogService.GetJobLogsAsync(jobId);
     }
 
     private string DisplayStatus(bool isExecuting, bool? succeeded)
@@ -78,7 +76,8 @@ else
 
     private async Task Refresh()
     {
+        ShowProgressIndicator();
         await GetJobLogs();
-        StateHasChanged();
+        HideProgressIndicator();
     }
 }

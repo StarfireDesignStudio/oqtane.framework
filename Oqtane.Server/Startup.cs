@@ -23,6 +23,7 @@ using OqtaneSSR.Extensions;
 using Microsoft.AspNetCore.Components.Authorization;
 using Oqtane.Providers;
 using Microsoft.AspNetCore.Cors.Infrastructure;
+using Microsoft.Net.Http.Headers;
 
 namespace Oqtane
 {
@@ -69,7 +70,6 @@ namespace Oqtane
             services.AddLocalization(options => options.ResourcesPath = "Resources");
 
             services.AddOptions<List<Database>>().Bind(Configuration.GetSection(SettingKeys.AvailableDatabasesSection));
-            services.Configure<HostOptions>(opts => opts.ShutdownTimeout = TimeSpan.FromSeconds(10)); // increase from default of 5 seconds
 
             // register scoped core services
             services.AddScoped<IAuthorizationHandler, PermissionHandler>()
@@ -98,8 +98,9 @@ namespace Oqtane
             {
                 options.HeaderName = Constants.AntiForgeryTokenHeaderName;
                 options.Cookie.Name = Constants.AntiForgeryTokenCookieName;
-                options.Cookie.SameSite = SameSiteMode.Strict;
+                options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Strict;
                 options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+                options.Cookie.HttpOnly = true;
             });
 
             services.AddIdentityCore<IdentityUser>(options => { })
@@ -135,10 +136,12 @@ namespace Oqtane
                     policy =>
                     {
                         // allow .NET MAUI client cross origin calls
-                        policy.WithOrigins("https://0.0.0.0", "http://0.0.0.0", "app://0.0.0.0")
+                        policy.WithOrigins("https://0.0.0.1", "http://0.0.0.1", "app://0.0.0.1")
                             .AllowAnyHeader().AllowAnyMethod().AllowCredentials();
                     });
             });
+
+            services.AddOutputCache();
 
             services.AddMvc(options =>
             {
@@ -158,7 +161,7 @@ namespace Oqtane
                    }
                }).AddHubOptions(options =>
                {
-                   options.MaximumReceiveMessageSize = null; // no limit (for large amnounts of data ie. textarea components)
+                   options.MaximumReceiveMessageSize = null; // no limit (for large amounts of data ie. textarea components)
                })
                .AddInteractiveWebAssemblyComponents();
 
@@ -192,18 +195,21 @@ namespace Oqtane
                 app.UseHsts();
             }
 
-            // execute any IServerStartup logic
-            app.ConfigureOqtaneAssemblies(env);
-
             // allow oqtane localization middleware
             app.UseOqtaneLocalization();
 
             app.UseHttpsRedirection();
             app.UseStaticFiles(new StaticFileOptions
             {
-                ServeUnknownFileTypes = true,
                 OnPrepareResponse = (ctx) =>
                 {
+                    // static asset caching
+                    var cachecontrol = Configuration.GetSection("CacheControl");
+                    if (!string.IsNullOrEmpty(cachecontrol.Value))
+                    {
+                        ctx.Context.Response.Headers.Append(HeaderNames.CacheControl, cachecontrol.Value);
+                    }
+                    // CORS headers for .NET MAUI clients
                     var policy = corsPolicyProvider.GetPolicyAsync(ctx.Context, Constants.MauiCorsPolicy)
                         .ConfigureAwait(false).GetAwaiter().GetResult();
                     corsService.ApplyResult(corsService.EvaluatePolicy(ctx.Context, policy), ctx.Context.Response);
@@ -214,9 +220,13 @@ namespace Oqtane
             app.UseJwtAuthorization();
             app.UseRouting();
             app.UseCors();
+            app.UseOutputCache();
             app.UseAuthentication();
             app.UseAuthorization();
             app.UseAntiforgery();
+
+            // execute any IServerStartup logic
+            app.ConfigureOqtaneAssemblies(env);
 
             if (_useSwagger)
             {

@@ -6,7 +6,6 @@ using System.Threading.Tasks;
 using System.Linq;
 using System.Security.Claims;
 using Oqtane.Shared;
-using System;
 using System.Net;
 using Oqtane.Enums;
 using Oqtane.Infrastructure;
@@ -26,21 +25,23 @@ namespace Oqtane.Controllers
         private readonly IUserManager _userManager;
         private readonly ISiteRepository _sites;
         private readonly IUserPermissions _userPermissions;
-        private readonly ISettingRepository _settings;
         private readonly IJwtManager _jwtManager;
         private readonly IFileRepository _files;
+        private readonly ISettingRepository _settings;
+        private readonly ISyncManager _syncManager;
         private readonly ILogManager _logger;
 
-        public UserController(IUserRepository users, ITenantManager tenantManager, IUserManager userManager, ISiteRepository sites, IUserPermissions userPermissions, ISettingRepository settings, IJwtManager jwtManager, IFileRepository files, ILogManager logger)
+        public UserController(IUserRepository users, ITenantManager tenantManager, IUserManager userManager, ISiteRepository sites, IUserPermissions userPermissions, IJwtManager jwtManager, IFileRepository files, ISettingRepository settings, ISyncManager syncManager, ILogManager logger)
         {
             _users = users;
             _tenantManager = tenantManager;
             _userManager = userManager;
             _sites = sites;
             _userPermissions = userPermissions;
-            _settings = settings;
             _jwtManager = jwtManager;
             _files = files;
+            _settings = settings;
+            _syncManager = syncManager;
             _logger = logger;
         }
 
@@ -55,12 +56,6 @@ namespace Oqtane.Controllers
                 if (user == null)
                 {
                     HttpContext.Response.StatusCode = (int)HttpStatusCode.NotFound;
-                }
-                else
-                {
-                    List<Setting> settings = _settings.GetSettings(EntityNames.User, user.UserId).ToList();
-                    user.Settings = settings.Where(item => !item.IsPrivate || _userPermissions.GetUser(User).UserId == user.UserId)
-                        .ToDictionary(setting => setting.SettingName, setting => setting.SettingValue);
                 }
                 return Filter(user);
             }
@@ -82,12 +77,6 @@ namespace Oqtane.Controllers
                 if (user == null)
                 {
                     HttpContext.Response.StatusCode = (int)HttpStatusCode.NotFound;
-                }
-                else
-                {
-                    List<Setting> settings = _settings.GetSettings(EntityNames.User, user.UserId).ToList();
-                    user.Settings = settings.Where(item => !item.IsPrivate || _userPermissions.GetUser(User).UserId == user.UserId)
-                        .ToDictionary(setting => setting.SettingName, setting => setting.SettingValue);
                 }
                 return Filter(user);
             }
@@ -112,12 +101,6 @@ namespace Oqtane.Controllers
                 {
                     HttpContext.Response.StatusCode = (int)HttpStatusCode.NotFound;
                 }
-                else
-                {
-                    List<Setting> settings = _settings.GetSettings(EntityNames.User, user.UserId).ToList();
-                    user.Settings = settings.Where(item => !item.IsPrivate || _userPermissions.GetUser(User).UserId == user.UserId)
-                        .ToDictionary(setting => setting.SettingName, setting => setting.SettingValue);
-                }
                 return Filter(user);
             }
             else
@@ -130,31 +113,47 @@ namespace Oqtane.Controllers
 
         private User Filter(User user)
         {
+            // clone object to avoid mutating cache 
+            User filtered = null;
+
             if (user != null)
             {
-                user.Password = "";
-                user.IsAuthenticated = false;
-                user.TwoFactorCode = "";
-                user.TwoFactorExpiry = null;
+                filtered = new User();
 
-                if (!_userPermissions.IsAuthorized(User, user.SiteId, EntityNames.User, -1, PermissionNames.Write, RoleNames.Admin) && User.Identity.Name?.ToLower() != user.Username.ToLower())
+                // public properties
+                filtered.SiteId = user.SiteId;
+                filtered.UserId = user.UserId;
+                filtered.Username = user.Username;
+                filtered.DisplayName = user.DisplayName;
+
+                // restricted properties
+                filtered.Password = "";
+                filtered.TwoFactorCode = "";
+                filtered.SecurityStamp = "";
+
+                // include private properties if authenticated user is accessing their own user account or is an administrator
+                if (_userPermissions.IsAuthorized(User, user.SiteId, EntityNames.User, -1, PermissionNames.Write, RoleNames.Admin) || _userPermissions.GetUser(User).UserId == user.UserId)
                 {
-                    user.Email = "";
-                    user.PhotoFileId = null;
-                    user.LastLoginOn = DateTime.MinValue;
-                    user.LastIPAddress = "";
-                    user.Roles = "";
-                    user.CreatedBy = "";
-                    user.CreatedOn = DateTime.MinValue;
-                    user.ModifiedBy = "";
-                    user.ModifiedOn = DateTime.MinValue;
-                    user.DeletedBy = "";
-                    user.DeletedOn = DateTime.MinValue;
-                    user.IsDeleted = false;
-                    user.TwoFactorRequired = false;
+                    filtered.Email = user.Email;
+                    filtered.TimeZoneId = user.TimeZoneId;
+                    filtered.PhotoFileId = user.PhotoFileId;
+                    filtered.LastLoginOn = user.LastLoginOn;
+                    filtered.LastIPAddress = user.LastIPAddress;
+                    filtered.TwoFactorRequired = user.TwoFactorRequired;
+                    filtered.EmailConfirmed = user.EmailConfirmed;
+                    filtered.Roles = user.Roles;
+                    filtered.CreatedBy = user.CreatedBy;
+                    filtered.CreatedOn = user.CreatedOn;
+                    filtered.ModifiedBy = user.ModifiedBy;
+                    filtered.ModifiedOn = user.ModifiedOn;
+                    filtered.DeletedBy = user.DeletedBy;
+                    filtered.DeletedOn = user.DeletedOn;
+                    filtered.IsDeleted = user.IsDeleted;
+                    filtered.Settings = user.Settings; // include all settings
                 }
             }
-            return user;
+
+            return filtered;
         }
 
         // POST api/<controller>
@@ -167,11 +166,13 @@ namespace Oqtane.Controllers
                 if (_userPermissions.IsAuthorized(User, user.SiteId, EntityNames.User, -1, PermissionNames.Write, RoleNames.Admin))
                 {
                     user.EmailConfirmed = true;
+                    user.IsAuthenticated = true;
                     allowregistration = true;
                 }
                 else
                 {
                     user.EmailConfirmed = false;
+                    user.IsAuthenticated = false;
                     allowregistration = _sites.GetSite(user.SiteId).AllowRegistration;
                 }
 
@@ -200,10 +201,15 @@ namespace Oqtane.Controllers
         [Authorize]
         public async Task<User> Put(int id, [FromBody] User user)
         {
-            if (ModelState.IsValid && user.SiteId == _tenantManager.GetAlias().SiteId && user.UserId == id && _users.GetUser(user.UserId, false) != null
+            var existing = _userManager.GetUser(user.UserId, user.SiteId);
+            if (ModelState.IsValid && user.SiteId == _tenantManager.GetAlias().SiteId && user.UserId == id && existing != null
                 && (_userPermissions.IsAuthorized(User, user.SiteId, EntityNames.User, -1, PermissionNames.Write, RoleNames.Admin) || User.Identity.Name == user.Username))
             {
-                user.EmailConfirmed = User.IsInRole(RoleNames.Admin);
+                // only authorized users can update the email confirmation
+                if (!_userPermissions.IsAuthorized(User, user.SiteId, EntityNames.User, -1, PermissionNames.Write, RoleNames.Admin))
+                {
+                    user.EmailConfirmed = existing.EmailConfirmed;
+                }
                 user = await _userManager.UpdateUser(user);
             }
             else
@@ -218,7 +224,7 @@ namespace Oqtane.Controllers
 
         // DELETE api/<controller>/5?siteid=x
         [HttpDelete("{id}")]
-        [Authorize(Policy = $"{EntityNames.User}:{PermissionNames.Write}:{RoleNames.Admin}")]
+        [Authorize(Policy = $"{EntityNames.User}:{PermissionNames.Write}:{RoleNames.Host}")]
         public async Task Delete(int id, string siteid)
         {
             User user = _users.GetUser(id, false);
@@ -253,8 +259,26 @@ namespace Oqtane.Controllers
         [Authorize]
         public async Task Logout([FromBody] User user)
         {
-            await HttpContext.SignOutAsync(Constants.AuthenticationScheme);
-            _logger.Log(LogLevel.Information, this, LogFunction.Security, "User Logout {Username}", (user != null) ? user.Username : "");
+            if (_userPermissions.GetUser(User).UserId == user.UserId)
+            {
+                await HttpContext.SignOutAsync(Constants.AuthenticationScheme);
+                _syncManager.AddSyncEvent(_tenantManager.GetAlias(), EntityNames.User, user.UserId, "Logout");
+                _logger.Log(LogLevel.Information, this, LogFunction.Security, "User Logout {Username}", (user != null) ? user.Username : "");
+            }
+        }
+
+        // POST api/<controller>/logout
+        [HttpPost("logouteverywhere")]
+        [Authorize]
+        public async Task LogoutEverywhere([FromBody] User user)
+        {
+            if (_userPermissions.GetUser(User).UserId == user.UserId)
+            {
+                await _userManager.LogoutUserEverywhere(user);
+                await HttpContext.SignOutAsync(Constants.AuthenticationScheme);
+                _syncManager.AddSyncEvent(_tenantManager.GetAlias(), EntityNames.User, user.UserId, "Logout");
+                _logger.Log(LogLevel.Information, this, LogFunction.Security, "User Logout Everywhere {Username}", (user != null) ? user.Username : "");
+            }
         }
 
         // POST api/<controller>/verify
@@ -322,6 +346,13 @@ namespace Oqtane.Controllers
         }
 
         // GET api/<controller>/validate/x
+        [HttpGet("validateuser")]
+        public async Task<UserValidateResult> ValidateUser(string username, string email, string password)
+        {
+            return await _userManager.ValidateUser(username, email, password);
+        }
+
+        // GET api/<controller>/validate/x
         [HttpGet("validate/{password}")]
         public async Task<bool> Validate(string password)
         {
@@ -375,6 +406,7 @@ namespace Oqtane.Controllers
                 }
                 if (roles != "") roles = ";" + roles;
                 user.Roles = roles;
+                user.SecurityStamp = User.SecurityStamp();
             }
             return user;
         }

@@ -2,15 +2,14 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
 using System.Threading.Tasks;
-using Oqtane.Modules;
 using Oqtane.Services;
 using Oqtane.Shared;
 
 namespace [Owner].Module.[Module].Services
 {
-    public class [Module]Service : ServiceBase, I[Module]Service, IService
+    public class [Module]Service : ServiceBase, I[Module]Service
     {
-        public [Module]Service(IHttpClientFactory http, SiteState siteState) : base(http, siteState) { }
+        public [Module]Service(HttpClient http, SiteState siteState) : base(http, siteState) { }
 
         private string Apiurl => CreateApiUrl("[Module]");
 
@@ -22,7 +21,7 @@ namespace [Owner].Module.[Module].Services
 
         public async Task<Models.[Module]> Get[Module]Async(int [Module]Id, int ModuleId)
         {
-            return await GetJsonAsync<Models.[Module]>(CreateAuthorizationPolicyUrl($"{Apiurl}/{[Module]Id}", EntityNames.Module, ModuleId));
+            return await GetJsonAsync<Models.[Module]>(CreateAuthorizationPolicyUrl($"{Apiurl}/{[Module]Id}/{ModuleId}", EntityNames.Module, ModuleId));
         }
 
         public async Task<Models.[Module]> Add[Module]Async(Models.[Module] [Module])
@@ -37,7 +36,7 @@ namespace [Owner].Module.[Module].Services
 
         public async Task Delete[Module]Async(int [Module]Id, int ModuleId)
         {
-            await DeleteAsync(CreateAuthorizationPolicyUrl($"{Apiurl}/{[Module]Id}", EntityNames.Module, ModuleId));
+            await DeleteAsync(CreateAuthorizationPolicyUrl($"{Apiurl}/{[Module]Id}/{ModuleId}", EntityNames.Module, ModuleId));
         }
     }
 }

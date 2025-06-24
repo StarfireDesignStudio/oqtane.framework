@@ -43,7 +43,7 @@ namespace Oqtane.Models
         public string Path { get; set; }
 
         /// <summary>
-        /// Sorting order of the folder
+        /// Sorting order of the folder ** not used as folders are sorted in alphabetical order **
         /// </summary>
         public int Order { get; set; }
 
@@ -63,7 +63,14 @@ namespace Oqtane.Models
         public bool IsSystem { get; set; }
 
         /// <summary>
-        /// Deprecated - not used
+        /// An HTTP Caching Cache-Control directive
+        /// </summary>
+        public string CacheControl { get; set; }
+
+        /// <summary>
+        /// Deprecated
+        /// Note that this property still exists in the database because columns cannot be dropped in SQLite
+        /// Therefore the property must be retained/mapped even though the framework no longer uses it
         /// </summary>
         public bool? IsDeleted { get; set; }
 

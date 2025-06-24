@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Microsoft.EntityFrameworkCore;
@@ -31,7 +32,47 @@ namespace Oqtane.Repository
             {
                 page.PermissionList = permissions.Where(item => item.EntityId == page.PageId).ToList();
             }
-            return pages;
+            return GetPagesHierarchy(pages);
+        }
+
+        private static List<Page> GetPagesHierarchy(List<Page> pages)
+        {
+            List<Page> hierarchy = new List<Page>();
+            Action<List<Page>, Page> getPath = null;
+            getPath = (pageList, page) =>
+            {
+                IEnumerable<Page> children;
+                int level;
+                if (page == null)
+                {
+                    level = -1;
+                    children = pages.Where(item => item.ParentId == null);
+                }
+                else
+                {
+                    level = page.Level;
+                    children = pages.Where(item => item.ParentId == page.PageId);
+                }
+                foreach (Page child in children)
+                {
+                    child.Level = level + 1;
+                    child.HasChildren = pages.Any(item => item.ParentId == child.PageId && !item.IsDeleted && item.IsNavigation);
+                    hierarchy.Add(child);
+                    getPath(pageList, child);
+                }
+            };
+            pages = pages.OrderBy(item => item.Order).ToList();
+            getPath(pages, null);
+
+            // add any non-hierarchical items to the end of the list
+            foreach (Page page in pages)
+            {
+                if (hierarchy.Find(item => item.PageId == page.PageId) == null)
+                {
+                    hierarchy.Add(page);
+                }
+            }
+            return hierarchy;
         }
 
         public Page AddPage(Page page)
@@ -91,18 +132,29 @@ namespace Oqtane.Repository
         public void DeletePage(int pageId)
         {
             using var db = _dbContextFactory.CreateDbContext();
-            var page = db.Page.Find(pageId);
-            _permissions.DeletePermissions(page.SiteId, EntityNames.Page, pageId);
-            _settings.DeleteSettings(EntityNames.Page, pageId);
-            // remove page modules for page
-            var pageModules = db.PageModule.Where(item => item.PageId == pageId).ToList();
-            foreach (var pageModule in pageModules)
             {
-                _pageModules.DeletePageModule(pageModule.PageModuleId);
+                var page = db.Page.Find(pageId);
+                _permissions.DeletePermissions(page.SiteId, EntityNames.Page, pageId);
+                _settings.DeleteSettings(EntityNames.Page, pageId);
+                // remove page modules for page
+                var pageModules = db.PageModule.Where(item => item.PageId == pageId).ToList();
+                foreach (var pageModule in pageModules)
+                {
+                    _pageModules.DeletePageModule(pageModule.PageModuleId);
+                }
+
+                // At this point the page item is unaware of changes happened in other
+                // contexts (i.e.: the contex opened and closed in each DeletePageModule).
+                // Workin on page item may result in unxpected behaviour:
+                // better close and reopen context to work on a fresh page item.
             }
-            // must occur after page modules are deleted because of cascading delete relationship
-            db.Page.Remove(page);
-            db.SaveChanges();
+
+            using var dbContext = _dbContextFactory.CreateDbContext();
+            {
+                var page = dbContext.Page.Find(pageId);
+                dbContext.Page.Remove(page);
+                dbContext.SaveChanges();
+            }
         }
     }
 }

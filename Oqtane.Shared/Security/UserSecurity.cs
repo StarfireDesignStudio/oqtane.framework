@@ -72,6 +72,11 @@ namespace Oqtane.Security
             return isAuthorized;
         }
 
+        public static bool ContainsRole(string roles, string roleName)
+        {
+            return roles.Split(';', StringSplitOptions.RemoveEmptyEntries).Contains(roleName);
+        }
+
         public static bool ContainsRole(List<Permission> permissions, string permissionName, string roleName)
         {
             return permissions.Any(item => item.PermissionName == permissionName && item.RoleName == roleName);
@@ -99,9 +104,9 @@ namespace Oqtane.Security
             if (alias != null && user != null && !user.IsDeleted)
             {
                 identity.AddClaim(new Claim(ClaimTypes.Name, user.Username));
-                identity.AddClaim(new Claim(ClaimTypes.NameIdentifier, user.UserId.ToString()));
-                identity.AddClaim(new Claim("sitekey", alias.SiteKey));
-                if (user.Roles.Contains(RoleNames.Host))
+                identity.AddClaim(new Claim(ClaimTypes.NameIdentifier, user.UserId.ToString()));                
+                identity.AddClaim(new Claim(Constants.SiteKeyClaimType, alias.SiteKey));
+                if (ContainsRole(user.Roles, RoleNames.Host))
                 {
                     // host users are site admins by default
                     identity.AddClaim(new Claim(ClaimTypes.Role, RoleNames.Host));
@@ -115,6 +120,7 @@ namespace Oqtane.Security
                         identity.AddClaim(new Claim(ClaimTypes.Role, role));
                     }
                 }
+                identity.AddClaim(new Claim(Constants.SecurityStampClaimType, user.SecurityStamp));
             }
             return identity;
         }

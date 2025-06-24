@@ -135,9 +135,6 @@
   <data name="Error.Folder.Save" xml:space="preserve">
     <value>Error Saving Folder</value>
   </data>
-  <data name="Message.Folder.Files.InvalidDelete" xml:space="preserve">
-    <value>Folder Has Files And Cannot Be Deleted</value>
-  </data>
   <data name="Message.Folder.Subfolders.InvalidDelete" xml:space="preserve">
     <value>Folder Has Subfolders And Cannot Be Deleted</value>
   </data>
@@ -150,14 +147,11 @@
   <data name="Name.HelpText" xml:space="preserve">
     <value>Enter the folder name</value>
   </data>
-  <data name="Permissions.HelpText" xml:space="preserve">
-    <value>Select the permissions you want for the folder</value>
-  </data>
   <data name="Parent.Text" xml:space="preserve">
     <value>Parent: </value>
   </data>
-  <data name="Permissions.Text" xml:space="preserve">
-    <value>Permissions: </value>
+  <data name="Permissions.Heading" xml:space="preserve">
+    <value>Permissions</value>
   </data>
   <data name="DeleteFolder.Header" xml:space="preserve">
     <value>Delete Folder</value>
@@ -178,7 +172,7 @@
     <value>Capacity:</value>
   </data>
   <data name="ImageSizes.HelpText" xml:space="preserve">
-    <value>Enter a list of image sizes which can be generated dynamically from uploaded images (ie. 200x200,400x400). Use * to indicate the folder supports all image sizes.</value>
+    <value>Optionally enter a list of image sizes which can be generated dynamically from uploaded images (ie. 200x200,400x400). Use * to indicate the folder supports all image sizes (not recommended).</value>
   </data>
   <data name="ImageSizes.Text" xml:space="preserve">
     <value>Image Sizes:</value>
@@ -197,5 +191,14 @@
   </data>
   <data name="Message.Folder.Duplicate" xml:space="preserve">
     <value>Folder Name Specified Already Exists In Parent</value>
+  </data>
+  <data name="Settings.Heading" xml:space="preserve">
+    <value>Settings</value>
+  </data>
+  <data name="CacheControl.Text" xml:space="preserve">
+    <value>Caching:</value>
+  </data>
+  <data name="CacheControl.HelpText" xml:space="preserve">
+    <value>Optionally provide a Cache-Control directive for this folder. For example 'public, max-age=60' indicates that files in this folder should be cached for 60 seconds. Please note that when caching is enabled, changes to files will not be immediately reflected in the UI.</value>
   </data>
 </root>

@@ -24,26 +24,50 @@ namespace Oqtane.Controllers
         private readonly IPageModuleRepository _pageModules;
         private readonly IUserPermissions _userPermissions;
         private readonly ISyncManager _syncManager;
-        private readonly IAliasAccessor _aliasAccessor;
-        private readonly IOptionsMonitorCache<CookieAuthenticationOptions> _cookieCache;
-        private readonly IOptionsMonitorCache<OpenIdConnectOptions> _oidcCache;
-        private readonly IOptionsMonitorCache<OAuthOptions> _oauthCache;
-        private readonly IOptionsMonitorCache<IdentityOptions> _identityCache;
+
+        private readonly IOptions<CookieAuthenticationOptions> _cookieOptions;
+        private readonly IOptionsSnapshot<CookieAuthenticationOptions> _cookieOptionsSnapshot;
+        private readonly IOptionsMonitorCache<CookieAuthenticationOptions> _cookieOptionsMonitorCache;
+
+        private readonly IOptions<OpenIdConnectOptions> _oidcOptions;
+        private readonly IOptionsSnapshot<OpenIdConnectOptions> _oidcOptionsSnapshot;
+        private readonly IOptionsMonitorCache<OpenIdConnectOptions> _oidcOptionsMonitorCache;
+
+        private readonly IOptions<OAuthOptions> _oauthOptions;
+        private readonly IOptionsSnapshot<OAuthOptions> _oauthOptionsSnapshot;
+        private readonly IOptionsMonitorCache<OAuthOptions> _oauthOptionsMonitorCache;
+
+        private readonly IOptions<IdentityOptions> _identityOptions;
+        private readonly IOptionsSnapshot<IdentityOptions> _identityOptionsSnapshot;
+        private readonly IOptionsMonitorCache<IdentityOptions> _identityOptionsMonitorCache;
+
         private readonly ILogManager _logger;
         private readonly Alias _alias;
         private readonly string _visitorCookie;
 
-        public SettingController(ISettingRepository settings, IPageModuleRepository pageModules, IUserPermissions userPermissions, ITenantManager tenantManager, ISyncManager syncManager, IAliasAccessor aliasAccessor, IOptionsMonitorCache<CookieAuthenticationOptions> cookieCache, IOptionsMonitorCache<OpenIdConnectOptions> oidcCache, IOptionsMonitorCache<OAuthOptions> oauthCache, IOptionsMonitorCache<IdentityOptions> identityCache, ILogManager logger)
+        public SettingController(ISettingRepository settings, IPageModuleRepository pageModules, IUserPermissions userPermissions, ITenantManager tenantManager, ISyncManager syncManager, 
+            IOptions<CookieAuthenticationOptions> cookieOptions, IOptionsSnapshot<CookieAuthenticationOptions> cookieOptionsSnapshot, IOptionsMonitorCache<CookieAuthenticationOptions> cookieOptionsMonitorCache,
+            IOptions<OpenIdConnectOptions> oidcOptions, IOptionsSnapshot<OpenIdConnectOptions> oidcOptionsSnapshot, IOptionsMonitorCache<OpenIdConnectOptions> oidcOptionsMonitorCache,
+            IOptions<OAuthOptions> oauthOptions, IOptionsSnapshot<OAuthOptions> oauthOptionsSnapshot, IOptionsMonitorCache<OAuthOptions> oauthOptionsMonitorCache,
+            IOptions<IdentityOptions> identityOptions, IOptionsSnapshot<IdentityOptions> identityOptionsSnapshot, IOptionsMonitorCache<IdentityOptions> identityOptionsMonitorCache, 
+            ILogManager logger)
         {
             _settings = settings;
             _pageModules = pageModules;
             _userPermissions = userPermissions;
             _syncManager = syncManager;
-            _aliasAccessor = aliasAccessor;
-            _cookieCache = cookieCache;
-            _oidcCache = oidcCache;
-            _oauthCache = oauthCache;
-            _identityCache = identityCache;
+            _cookieOptions = cookieOptions;
+            _cookieOptionsSnapshot = cookieOptionsSnapshot;
+            _cookieOptionsMonitorCache = cookieOptionsMonitorCache;
+            _oidcOptions = oidcOptions;
+            _oidcOptionsSnapshot = oidcOptionsSnapshot;
+            _oidcOptionsMonitorCache = oidcOptionsMonitorCache;
+            _oauthOptions = oauthOptions;
+            _oauthOptionsSnapshot = oauthOptionsSnapshot;
+            _oauthOptionsMonitorCache = oauthOptionsMonitorCache;
+            _identityOptions = identityOptions;
+            _identityOptionsSnapshot = identityOptionsSnapshot;
+            _identityOptionsMonitorCache = identityOptionsMonitorCache;
             _logger = logger;
             _alias = tenantManager.GetAlias();
             _visitorCookie = Constants.VisitorCookiePrefix + _alias.SiteId.ToString();
@@ -64,7 +88,7 @@ namespace Oqtane.Controllers
             }
             else
             {
-                // suppress unauthorized visitor logging as it is usually caused by clients that do not support cookies 
+                // suppress unauthorized visitor logging as it is usually caused by clients that do not support cookies or private browsing sessions
                 if (entityName != EntityNames.Visitor) 
                 {
                     _logger.Log(LogLevel.Error, this, LogFunction.Read, "User Not Authorized To Access Settings {EntityName} {EntityId}", entityName, entityId);
@@ -109,7 +133,7 @@ namespace Oqtane.Controllers
             if (ModelState.IsValid && IsAuthorized(setting.EntityName, setting.EntityId, PermissionNames.Edit))
             {
                 setting = _settings.AddSetting(setting);
-                AddSyncEvent(setting.EntityName, setting.SettingId, SyncEventActions.Create);
+                AddSyncEvent(setting.EntityName, setting.EntityId, setting.SettingId, SyncEventActions.Create);
                 _logger.Log(LogLevel.Information, this, LogFunction.Create, "Setting Added {Setting}", setting);
             }
             else
@@ -131,7 +155,7 @@ namespace Oqtane.Controllers
             if (ModelState.IsValid && setting.SettingId == id && IsAuthorized(setting.EntityName, setting.EntityId, PermissionNames.Edit))
             {
                 setting = _settings.UpdateSetting(setting);
-                AddSyncEvent(setting.EntityName, setting.SettingId, SyncEventActions.Update);
+                AddSyncEvent(setting.EntityName, setting.EntityId, setting.SettingId, SyncEventActions.Update);
                 _logger.Log(LogLevel.Information, this, LogFunction.Update, "Setting Updated {Setting}", setting);
             }
             else
@@ -146,22 +170,60 @@ namespace Oqtane.Controllers
             return setting;
         }
 
-        // DELETE api/<controller>/5/xxx
-        [HttpDelete("{id}/{entityName}")]
-        public void Delete(string entityName, int id)
+        // PUT api/<controller>/site/1/settingname/x/false
+        [HttpPut("{entityName}/{entityId}/{settingName}/{settingValue}/{isPrivate}")]
+        public void Put(string entityName, int entityId, string settingName, string settingValue, bool isPrivate)
         {
-            Setting setting = _settings.GetSetting(entityName, id);
-            if (IsAuthorized(setting.EntityName, setting.EntityId, PermissionNames.Edit))
+            if (IsAuthorized(entityName, entityId, PermissionNames.Edit))
             {
-                _settings.DeleteSetting(setting.EntityName, id);
-                AddSyncEvent(setting.EntityName, setting.SettingId, SyncEventActions.Delete);
+                Setting setting = _settings.GetSetting(entityName, entityId, settingName);
+                if (setting == null)
+                {
+                    setting = new Setting();
+                    setting.EntityName = entityName;
+                    setting.EntityId = entityId;
+                    setting.SettingName = settingName;
+                    setting.SettingValue = settingValue;
+                    setting.IsPrivate = isPrivate;
+                    setting = _settings.AddSetting(setting);
+                    AddSyncEvent(setting.EntityName, setting.EntityId, setting.SettingId, SyncEventActions.Create);
+                    _logger.Log(LogLevel.Information, this, LogFunction.Update, "Setting Created {Setting}", setting);
+                }
+                else
+                {
+                    if (setting.SettingValue != settingValue || setting.IsPrivate != isPrivate)
+                    {
+                        setting.SettingValue = settingValue;
+                        setting.IsPrivate = isPrivate;
+                        setting = _settings.UpdateSetting(setting);
+                        AddSyncEvent(setting.EntityName, setting.EntityId, setting.SettingId, SyncEventActions.Update);
+                        _logger.Log(LogLevel.Information, this, LogFunction.Update, "Setting Updated {Setting}", setting);
+                    }
+                }
+            }
+            else
+            {
+                _logger.Log(LogLevel.Error, this, LogFunction.Update, "User Not Authorized To Add Or Update Setting {EntityName} {EntityId} {SettingName}", entityName, entityId, settingName);
+                HttpContext.Response.StatusCode = (int)HttpStatusCode.Forbidden;
+            }
+        }
+
+        // DELETE api/<controller>/site/1/settingname
+        [HttpDelete("{entityName}/{entityId}/{settingName}")]
+        public void Delete(string entityName, int entityId, string settingName)
+        {
+            Setting setting = _settings.GetSetting(entityName, entityId, settingName);
+            if (setting != null && IsAuthorized(setting.EntityName, setting.EntityId, PermissionNames.Edit))
+            {
+                _settings.DeleteSetting(setting.EntityName, setting.SettingId);
+                AddSyncEvent(setting.EntityName, setting.EntityId, setting.SettingId, SyncEventActions.Delete);
                 _logger.Log(LogLevel.Information, this, LogFunction.Delete, "Setting Deleted {Setting}", setting);
             }
             else
             {
                 if (entityName != EntityNames.Visitor)
                 {
-                    _logger.Log(LogLevel.Error, this, LogFunction.Delete, "User Not Authorized To Delete Setting {Setting}", setting);
+                    _logger.Log(LogLevel.Error, this, LogFunction.Delete, "Setting Does Not Exist Or User Not Authorized To Delete Setting For Entity {EntityName} Id {EntityId} Name {SettingName}", entityName, entityId, settingName);
                     HttpContext.Response.StatusCode = (int)HttpStatusCode.Forbidden;
                 }
             }
@@ -172,21 +234,21 @@ namespace Oqtane.Controllers
         [Authorize(Roles = RoleNames.Admin)]
         public void Clear()
         {
-            // clear SiteOptionsCache for each option type
-            var cookieCache = new SiteOptionsCache<CookieAuthenticationOptions>(_aliasAccessor);
-            cookieCache.Clear();
-            var oidcCache = new SiteOptionsCache<OpenIdConnectOptions>(_aliasAccessor);
-            oidcCache.Clear();
-            var oauthCache = new SiteOptionsCache<OAuthOptions>(_aliasAccessor);
-            oauthCache.Clear();
-            var identityCache = new SiteOptionsCache<IdentityOptions>(_aliasAccessor);
-            identityCache.Clear();
+            (_cookieOptions as SiteOptionsManager<CookieAuthenticationOptions>).Reset();
+            (_cookieOptionsSnapshot as SiteOptionsManager<CookieAuthenticationOptions>).Reset();
+            _cookieOptionsMonitorCache.Clear();
 
-            // clear IOptionsMonitorCache for each option type
-            _cookieCache.Clear();
-            _oidcCache.Clear();
-            _oauthCache.Clear();
-            _identityCache.Clear();
+            (_oidcOptions as SiteOptionsManager<OpenIdConnectOptions>).Reset();
+            (_oidcOptionsSnapshot as SiteOptionsManager<OpenIdConnectOptions>).Reset();
+            _oidcOptionsMonitorCache.Clear();
+
+            (_oauthOptions as SiteOptionsManager<OAuthOptions>).Reset();
+            (_oauthOptionsSnapshot as SiteOptionsManager<OAuthOptions>).Reset();
+            _oauthOptionsMonitorCache.Clear();
+
+            (_identityOptions as SiteOptionsManager<IdentityOptions>).Reset();
+            (_identityOptionsSnapshot as SiteOptionsManager<IdentityOptions>).Reset();
+            _identityOptionsMonitorCache.Clear();
 
             _logger.Log(LogLevel.Information, this, LogFunction.Other, "Site Options Cache Cleared");
         }
@@ -231,11 +293,7 @@ namespace Oqtane.Controllers
                     authorized = _userPermissions.IsAuthorized(User, _alias.SiteId, entityName, entityId, permissionName);
                     break;
                 case EntityNames.User:
-                    authorized = true;
-                    if (permissionName == PermissionNames.Edit)
-                    {
-                        authorized = _userPermissions.IsAuthorized(User, _alias.SiteId, entityName, -1, PermissionNames.Write, RoleNames.Admin) || (_userPermissions.GetUser(User).UserId == entityId);
-                    }
+                    authorized = _userPermissions.IsAuthorized(User, _alias.SiteId, entityName, -1, PermissionNames.Write, RoleNames.Admin) || (_userPermissions.GetUser(User).UserId == entityId);
                     break;
                 case EntityNames.Visitor:
                     authorized = User.IsInRole(RoleNames.Admin);
@@ -281,7 +339,7 @@ namespace Oqtane.Controllers
                     filter = !_userPermissions.IsAuthorized(User, _alias.SiteId, entityName, entityId, PermissionNames.Edit);
                     break;
                 case EntityNames.User:
-                    filter = !User.IsInRole(RoleNames.Admin) && _userPermissions.GetUser(User).UserId != entityId;
+                    filter = !_userPermissions.IsAuthorized(User, _alias.SiteId, entityName, -1, PermissionNames.Write, RoleNames.Admin) && _userPermissions.GetUser(User).UserId != entityId;
                     break;
                 case EntityNames.Visitor:
                     if (!User.IsInRole(RoleNames.Admin))
@@ -300,7 +358,7 @@ namespace Oqtane.Controllers
             return filter;
         }
 
-        private void AddSyncEvent(string EntityName, int SettingId, string Action)
+        private void AddSyncEvent(string EntityName, int EntityId, int SettingId, string Action)
         {
             _syncManager.AddSyncEvent(_alias, EntityName + "Setting", SettingId, Action);
 
@@ -310,6 +368,9 @@ namespace Oqtane.Controllers
                 case EntityNames.Page:
                 case EntityNames.Site:
                     _syncManager.AddSyncEvent(_alias, EntityNames.Site, _alias.SiteId, SyncEventActions.Refresh);
+                    break;
+                case EntityNames.User:
+                    _syncManager.AddSyncEvent(_alias, EntityName, EntityId, SyncEventActions.Update);
                     break;
             }
         }

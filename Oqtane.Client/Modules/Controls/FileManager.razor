@@ -3,8 +3,8 @@
 @inherits ModuleControlBase
 @inject IFolderService FolderService
 @inject IFileService FileService
-@inject ISettingService SettingService
 @inject IUserService UserService
+@inject ISettingService SettingService
 @inject IStringLocalizer<FileManager> Localizer
 @inject IStringLocalizer<SharedResources> SharedLocalizer
 
@@ -158,8 +158,18 @@
     public bool UploadMultiple { get; set; } = false; // optional - enable multiple file uploads - default false
 
     [Parameter]
+    public int ChunkSize { get; set; } = 1; // optional - size of file chunks to upload in MB
+
+    [Parameter]
     public EventCallback<int> OnUpload { get; set; } // optional - executes a method in the calling component when a file is uploaded
 
+    [Parameter]
+    public EventCallback<int> OnSelectFolder { get; set; } // optional - executes a method in the calling component when a folder is selected
+
+    [Parameter]
+    public EventCallback<int> OnSelectFile { get; set; } // optional - executes a method in the calling component when a file is selected
+
+    [Obsolete("Use OnSelectFile instead.")]
     [Parameter]
     public EventCallback<int> OnSelect { get; set; } // optional - executes a method in the calling component when a file is selected
 
@@ -196,7 +206,7 @@
             else
             {
                 FolderId = -1;
-                _message = "Folder Path " + Folder + "Does Not Exist";
+                _message = "Folder Path " + Folder + " Does Not Exist";
                 _messagetype = MessageType.Error;
             }
         }
@@ -226,9 +236,9 @@
             }
             else
             {
-                FileId = -1; // file does not exist
-                _message = "FileId " + FileId.ToString() + "Does Not Exist";
+                _message = "FileId " + FileId.ToString() + " Does Not Exist";
                 _messagetype = MessageType.Error;
+                FileId = -1; // file does not exist
             }
         }
 
@@ -297,6 +307,8 @@
             FileId = -1;
             _file = null;
             _image = string.Empty;
+
+            await OnSelectFolder.InvokeAsync(FolderId);
             StateHasChanged();
         }
         catch (Exception ex)
@@ -312,9 +324,11 @@
         _message = string.Empty;
         FileId = int.Parse((string)e.Value);
         await SetImage();
+    #pragma warning disable CS0618
         await OnSelect.InvokeAsync(FileId);
+    #pragma warning restore CS0618
+        await OnSelectFile.InvokeAsync(FileId);
         StateHasChanged();
-
     }
 
     private async Task SetImage()
@@ -360,11 +374,7 @@
             }
             if (restricted == "")
             {
-                if (!ShowProgress)
-                {
-                    _uploading = true;
-                    StateHasChanged();
-                }
+                CancellationTokenSource tokenSource = new CancellationTokenSource();
 
                 try
                 {
@@ -375,52 +385,30 @@
                     if (PageState.Runtime == Shared.Runtime.Hybrid)
                     {
                         jwt = await UserService.GetTokenAsync();
+                        if (string.IsNullOrEmpty(jwt))
+                        {
+                            await logger.LogInformation("File Upload Failed From .NET MAUI Due To Missing Security Token. Token Options Must Be Set In User Settings.");
+                            _message = "Security Token Not Specified";
+                            _messagetype = MessageType.Error;
+                            return;
+                        }
                     }
-                    await interop.UploadFiles(posturl, folder, _guid, SiteState.AntiForgeryToken, jwt);
 
-                    // uploading is asynchronous so we need to poll to determine if uploads are completed
-                    var success = true;
-                    int upload = 0;
-                    while (upload < uploads.Length && success)
+                    var chunksize = ChunkSize;
+                    if (chunksize == 1)
                     {
-                        success = false;
-                        var filename = uploads[upload].Split(':')[0];
-
-                        var size = Int64.Parse(uploads[upload].Split(':')[1]); // bytes
-                        var megabits = (size / 1048576.0) * 8; // binary conversion
-                        var uploadspeed = 2; // 2 Mbps (3G ranges from 300Kbps to 3Mbps)
-                        var uploadtime = (megabits / uploadspeed); // seconds
-                        var maxattempts = 5; // polling (minimum timeout duration will be 5 seconds)
-                        var sleep = (int)Math.Ceiling(uploadtime / maxattempts) * 1000; // milliseconds
-
-                        int attempts = 0;
-                        while (attempts < maxattempts && !success)
-                        {
-                            attempts += 1;
-                            Thread.Sleep(sleep);
-
-                            if (Folder == Constants.PackagesFolder)
-                            {
-                                var files = await FileService.GetFilesAsync(folder);
-                                if (files != null && files.Any(item => item.Name == filename))
-                                {
-                                    success = true;
-                                }
-                            }
-                            else
-                            {
-                                var file = await FileService.GetFileAsync(int.Parse(folder), filename);
-                                if (file != null)
-                                {
-                                    success = true;
-                                }
-                            }
-                        }
-                        if (success)
-                        {
-                            upload++;
-                        }
+                        // if ChunkSize parameter is not overridden use the site setting
+                        chunksize = int.Parse(SettingService.GetSetting(PageState.Site.Settings, "MaxChunkSize", "1"));
                     }
+
+                    if (!ShowProgress)
+                    {
+                        _uploading = true;
+                        StateHasChanged();
+                    }
+
+                    // upload files
+                    var success = await interop.UploadFiles(posturl, folder, _guid, SiteState.AntiForgeryToken, jwt, chunksize, tokenSource.Token);
 
                     // reset progress indicators
                     if (ShowProgress)
@@ -445,7 +433,7 @@
                     }
                     else
                     {
-                        await logger.LogInformation("File Upload Failed Or Is Still In Progress {Files}", uploads);
+                        await logger.LogError("File Upload Failed {Files}", uploads);
                         _message = Localizer["Error.File.Upload"];
                         _messagetype = MessageType.Error;
                     }
@@ -462,7 +450,10 @@
                         {
                             FileId = file.FileId;
                             await SetImage();
+#pragma warning disable CS0618
                             await OnSelect.InvokeAsync(FileId);
+#pragma warning restore CS0618
+                            await OnSelectFile.InvokeAsync(FileId);
                             await OnUpload.InvokeAsync(FileId);
                         }
                         await GetFiles();
@@ -475,6 +466,10 @@
                     _message = Localizer["Error.File.Upload"];
                     _messagetype = MessageType.Error;
                     _uploading = false;
+                    await tokenSource.CancelAsync();
+                }
+                finally {
+                    tokenSource.Dispose();
                 }
 
             }
@@ -509,7 +504,10 @@
 			await GetFiles();
 			FileId = -1;
 			await SetImage();
+#pragma warning disable CS0618
             await OnSelect.InvokeAsync(FileId);
+#pragma warning restore CS0618
+            await OnSelectFile.InvokeAsync(FileId);
             StateHasChanged();
 		}
 		catch (Exception ex)

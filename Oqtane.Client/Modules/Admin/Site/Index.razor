@@ -10,10 +10,12 @@
 @inject IAliasService AliasService
 @inject IThemeService  ThemeService
 @inject ISettingService  SettingService
+@inject ITimeZoneService TimeZoneService
 @inject IServiceProvider ServiceProvider
 @inject IStringLocalizer<Index> Localizer
 @inject INotificationService NotificationService
 @inject IStringLocalizer<SharedResources> SharedLocalizer
+@inject IOutputCacheService CacheService
 
 @if (_initialized)
 {
@@ -32,32 +34,45 @@
                         <option value="-">&lt;@SharedLocalizer["Not Specified"]&gt;</option>
                         @foreach (Page page in _pages)
                         {
-							if (UserSecurity.ContainsRole(page.PermissionList, PermissionNames.View, RoleNames.Everyone))
-							{
-								<option value="@(page.PageId)">@(new string('-', page.Level * 2))@(page.Name)</option>
-							}
+                            if (UserSecurity.ContainsRole(page.PermissionList, PermissionNames.View, RoleNames.Everyone))
+                            {
+                                <option value="@(page.PageId)">@(new string('-', page.Level * 2))@(page.Name)</option>
+                            }
                         }
                     </select>
                 </div>
             </div>
-			<div class="row mb-1 align-items-center">
-				<Label Class="col-sm-3" For="isDeleted" HelpText="Is this site deleted?" ResourceKey="IsDeleted">Deleted? </Label>
-				<div class="col-sm-9">
-					<select id="isDeleted" class="form-select" @bind="@_isdeleted" required>
-						<option value="True">@SharedLocalizer["Yes"]</option>
-						<option value="False">@SharedLocalizer["No"]</option>
-					</select>
-				</div>
-			</div>
-			<div class="row mb-1 align-items-center">
-				<Label Class="col-sm-3" For="sitemap" HelpText="The site map url for this site which can be submitted to search engines for indexing" ResourceKey="SiteMap">Site Map: </Label>
-				<div class="col-sm-9">
+            <div class="row mb-1 align-items-center">
+                <Label Class="col-sm-3" For="timezone" HelpText="Your time zone" ResourceKey="TimeZone">Time Zone:</Label>
+                <div class="col-sm-9">
+                    <select id="timezone" class="form-select" @bind="@_timezoneid">
+                        <option value="">&lt;@SharedLocalizer["Not Specified"]&gt;</option>
+                        @foreach (var timezone in _timezones)
+                        {
+                            <option value="@timezone.Id">@timezone.DisplayName</option>
+                        }
+                    </select>
+                </div>
+            </div>
+            <div class="row mb-1 align-items-center">
+                <Label Class="col-sm-3" For="isDeleted" HelpText="Is this site deleted?" ResourceKey="IsDeleted">Deleted? </Label>
+                <div class="col-sm-9">
+                    <select id="isDeleted" class="form-select" @bind="@_isdeleted" required>
+                        <option value="True">@SharedLocalizer["Yes"]</option>
+                        <option value="False">@SharedLocalizer["No"]</option>
+                    </select>
+                </div>
+            </div>
+            <div class="row mb-1 align-items-center">
+                <Label Class="col-sm-3" For="sitemap" HelpText="The site map url for this site which can be submitted to search engines for indexing. The sitemap is cached for 5 minutes and the cache can be manually cleared." ResourceKey="SiteMap">Site Map: </Label>
+                <div class="col-sm-9">
                     <div class="input-group">
                         <input id="sitemap" class="form-control" @bind="@_sitemap" disabled />
                         <a href="@_sitemap" class="btn btn-secondary" target="_new">@Localizer["Browse"]</a>
+                        <button type="button" class="btn btn-danger" @onclick="EvictSitemapOutputCache">@Localizer["SiteMap.EvictCache"]</button>
                     </div>
                 </div>
-			</div>
+            </div>
             <div class="row mb-1 align-items-center">
                 <Label Class="col-sm-3" For="siteguid" HelpText="The Unique Identifier For The Site" ResourceKey="SiteGuid">ID: </Label>
                 <div class="col-sm-9">
@@ -72,20 +87,8 @@
             </div>
         </div>
         <br />
-        <Section Name="Appearance" Heading="Appearance" ResourceKey="Appearance">
+        <Section Name="Theme" Heading="Theme" ResourceKey="Theme">
             <div class="container">
-                <div class="row mb-1 align-items-center">
-                    <Label Class="col-sm-3" For="logo" HelpText="Specify a logo for the site" ResourceKey="Logo">Logo: </Label>
-                    <div class="col-sm-9">
-                        <FileManager FileId="@_logofileid" Filter="@_imageFiles" @ref="_logofilemanager" />
-                    </div>
-                </div>
-                <div class="row mb-1 align-items-center">
-                    <Label Class="col-sm-3" For="favicon" HelpText="Specify a Favicon" ResourceKey="FavoriteIcon">Favicon: </Label>
-                    <div class="col-sm-9">
-                        <FileManager FileId="@_faviconfileid" Filter="ico,png,gif" @ref="_faviconfilemanager" />
-                    </div>
-                </div>
                 <div class="row mb-1 align-items-center">
                     <Label Class="col-sm-3" For="defaultTheme" HelpText="Select the sites default theme" ResourceKey="DefaultTheme">Default Theme: </Label>
                     <div class="col-sm-9">
@@ -126,6 +129,32 @@
                         </select>
                     </div>
                 </div>
+                <div class="row mb-1 align-items-center">
+                    <Label Class="col-sm-3" For="cookieconsent" HelpText="Specify if cookie consent is enabled on this site. Please note this option must be used in conjunction with a Theme which supports cookie consent." ResourceKey="CookieConsent">Cookie Consent: </Label>
+                    <div class="col-sm-9">
+                        <select id="cookieconsent" class="form-select" @bind="@_cookieconsent">
+                            <option value="">@SharedLocalizer["Disabled"]</option>
+                            <option value="optin">@Localizer["OptIn"]</option>
+                            <option value="optout">@Localizer["OptOut"]</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </Section>
+        <Section Name="Appearance" Heading="Appearance" ResourceKey="Appearance">
+            <div class="container">
+                <div class="row mb-1 align-items-center">
+                    <Label Class="col-sm-3" For="logo" HelpText="Specify a logo for the site" ResourceKey="Logo">Logo: </Label>
+                    <div class="col-sm-9">
+                        <FileManager FileId="@_logofileid" Filter="@_imagefiles" @ref="_logofilemanager" />
+                    </div>
+                </div>
+                <div class="row mb-1 align-items-center">
+                    <Label Class="col-sm-3" For="favicon" HelpText="Specify a Favicon" ResourceKey="FavoriteIcon">Favicon: </Label>
+                    <div class="col-sm-9">
+                        <FileManager FileId="@_faviconfileid" Filter="ico,png,gif" @ref="_faviconfilemanager" />
+                    </div>
+                </div>
             </div>
         </Section>
         <Section Name="Functionality" Heading="Functionality" ResourceKey="Functionality">
@@ -144,23 +173,11 @@
                         </select>
                     </div>
                 </div>
-                <div class="row mb-1 align-items-center">
-                    <Label Class="col-sm-3" For="imageExt" HelpText="Enter a comma separated list of image file extensions" ResourceKey="ImageExtensions">Image Extensions: </Label>
-                    <div class="col-sm-9">
-                        <input id="imageExt" spellcheck="false" class="form-control" @bind="@_imageFiles" />
-                    </div>
-                </div>
-                <div class="row mb-1 align-items-center">
-                    <Label Class="col-sm-3" For="uploadableFileExt" HelpText="Enter a comma separated list of uploadable file extensions" ResourceKey="UploadableFileExtensions">Uploadable File Extensions: </Label>
-                    <div class="col-sm-9">
-                        <input id="uploadableFileExt" spellcheck="false" class="form-control" @bind="@_uploadableFiles" />
-                    </div>
-                </div>
             </div>
         </Section>
         <Section Name="PageContent" Heading="Page Content" ResourceKey="PageContent">
-           <div class="container">
-               <div class="row mb-1 align-items-center">
+            <div class="container">
+                <div class="row mb-1 align-items-center">
                     <Label Class="col-sm-3" For="headcontent" HelpText="Optionally enter content to be included in the page head (ie. meta, link, or script tags)" ResourceKey="HeadContent">Head Content: </Label>
                     <div class="col-sm-9">
                         <textarea id="headcontent" class="form-control" @bind="@_headcontent" rows="3"></textarea>
@@ -207,16 +224,16 @@
                 <div class="row mb-1 align-items-center">
                     <Label Class="col-sm-3" For="username" HelpText="Enter the username for your SMTP account" ResourceKey="SmtpUsername">Username: </Label>
                     <div class="col-sm-9">
-                        <input id="username" class="form-control" @bind="@_smtpusername" />
+                        <input id="username" class="form-control" @bind="@_smtpusername" autocomplete="off"/>
                     </div>
                 </div>
                 <div class="row mb-1 align-items-center">
                     <Label Class="col-sm-3" For="password" HelpText="Enter the password for your SMTP account" ResourceKey="SmtpPassword">Password: </Label>
                     <div class="col-sm-9">
-						<div class="input-group">
-							<input id="password" type="@_smtppasswordtype" class="form-control" @bind="@_smtppassword" />
+                        <div class="input-group">
+                            <input id="password" type="@_smtppasswordtype" class="form-control" @bind="@_smtppassword" autocomplete="off"/>
                             <button type="button" class="btn btn-secondary" @onclick="@ToggleSMTPPassword" tabindex="-1">@_togglesmtppassword</button>
-						</div>
+                        </div>
                     </div>
                 </div>
                 <div class="row mb-1 align-items-center">
@@ -225,15 +242,15 @@
                         <input id="sender" class="form-control" @bind="@_smtpsender" />
                     </div>
                 </div>
-				<div class="row mb-1 align-items-center">
-					<Label Class="col-sm-3" For="relay" HelpText="Only specify this option if you have properly configured an SMTP Relay Service to route your outgoing mail. This option will send notifications from the user's email rather than from the Email Sender specified above." ResourceKey="SmtpRelay">Relay Configured? </Label>
-					<div class="col-sm-9">
-						<select id="relay" class="form-select" @bind="@_smtprelay" required>
-							<option value="True">@SharedLocalizer["Yes"]</option>
-							<option value="False">@SharedLocalizer["No"]</option>
-						</select>
-					</div>
-				</div>
+                <div class="row mb-1 align-items-center">
+                    <Label Class="col-sm-3" For="relay" HelpText="Only specify this option if you have properly configured an SMTP Relay Service to route your outgoing mail. This option will send notifications from the user's email rather than from the Email Sender specified above." ResourceKey="SmtpRelay">Relay Configured? </Label>
+                    <div class="col-sm-9">
+                        <select id="relay" class="form-select" @bind="@_smtprelay" required>
+                            <option value="True">@SharedLocalizer["Yes"]</option>
+                            <option value="False">@SharedLocalizer["No"]</option>
+                        </select>
+                    </div>
+                </div>
                 <div class="row mb-1 align-items-center">
                     <Label Class="col-sm-3" For="smtpenabled" HelpText="Specify if SMTP is enabled for this site" ResourceKey="SMTPEnabled">Enabled? </Label>
                     <div class="col-sm-9">
@@ -244,10 +261,10 @@
                     </div>
                 </div>
                 <div class="row mb-1 align-items-center">
-					<Label Class="col-sm-3" For="retention" HelpText="Number of days of notifications to retain" ResourceKey="Retention">Retention (Days): </Label>
-					<div class="col-sm-9">
+                    <Label Class="col-sm-3" For="retention" HelpText="Number of days of notifications to retain" ResourceKey="Retention">Retention (Days): </Label>
+                    <div class="col-sm-9">
                         <input id="retention" class="form-control" type="number" min="0" step="1" @bind="@_retention" />
-					</div>
+                    </div>
                 </div>
                 <button type="button" class="btn btn-secondary" @onclick="SendEmail">@Localizer["Smtp.TestConfig"]</button>
                 <br /><br />
@@ -280,57 +297,57 @@
         </Section>
         @if (_aliases != null && UserSecurity.IsAuthorized(PageState.User, RoleNames.Host))
         {
-			<Section Name="Aliases" Heading="Aliases" ResourceKey="Aliases">
-	            <div class="container">
-					<div class="row mb-1 align-items-center">
-                    <Label Class="col-sm-3" For="aliases" HelpText="The urls for the site. This can include domain names (ie. domain.com), subdomains (ie. sub.domain.com) or virtual folders (ie. domain.com/folder)." ResourceKey="Aliases">Aliases: </Label>
-						<div class="col-sm-9">
-							<button type="button" class="btn btn-primary" @onclick="AddAlias">@SharedLocalizer["Add"]</button>
-							<Pager Items="@_aliases">
-								<Header>
-									<th style="width: 1px;">&nbsp;</th>
-									<th style="width: 1px;">&nbsp;</th>
-									<th>@Localizer["AliasName"]</th>
-									<th>@Localizer["AliasDefault"]</th>
-								</Header>
-								<Row>
-									@if (context.AliasId != _aliasid)
-									{
-										<td>
-											@if (_aliasid == -1)
-											{
-												<button type="button" class="btn btn-primary" @onclick="@(() => EditAlias(context))">@SharedLocalizer["Edit"]</button>
-											}
-										</td>
-										<td>
-											@if (_aliasid == -1)
-											{
-												<ActionDialog Action="Delete" OnClick="@(async () => await DeleteAlias(context))" ResourceKey="DeleteAlias" Class="btn btn-danger" Header="Delete Alias" Message="@string.Format(Localizer["Confirm.Alias.Delete", context.Name])" />
-											}
-										</td>
-										<td>@context.Name</td>
-										<td>@context.IsDefault</td>
-									}
-									else
-									{
-										<td><button type="button" class="btn btn-success" @onclick="@(async () => await SaveAlias())">@SharedLocalizer["Save"]</button></td>
-										<td><button type="button" class="btn btn-secondary" @onclick="@(async () => await CancelAlias())">@SharedLocalizer["Cancel"]</button></td>
-										<td>
-											<input id="aliasname" class="form-control" @bind="@_aliasname" />
-										</td>
-										<td>
-											<select id="defaultalias" class="form-select" @bind="@_defaultalias" required>
-												<option value="True">@SharedLocalizer["Yes"]</option>
-												<option value="False">@SharedLocalizer["No"]</option>
-											</select>
-										</td>
-									}
-								</Row>
-							</Pager>
-						</div>
-					</div>
-				</div>
-			</Section>
+            <Section Name="Aliases" Heading="Aliases" ResourceKey="Aliases">
+                <div class="container">
+                    <div class="row mb-1 align-items-center">
+                        <Label Class="col-sm-3" For="aliases" HelpText="The urls for the site. This can include domain names (ie. domain.com), subdomains (ie. sub.domain.com) or virtual folders (ie. domain.com/folder)." ResourceKey="Aliases">Aliases: </Label>
+                        <div class="col-sm-9">
+                            <button type="button" class="btn btn-primary" @onclick="AddAlias">@SharedLocalizer["Add"]</button>
+                            <Pager Items="@_aliases">
+                                <Header>
+                                    <th style="width: 1px;">&nbsp;</th>
+                                    <th style="width: 1px;">&nbsp;</th>
+                                    <th>@Localizer["AliasName"]</th>
+                                    <th>@Localizer["AliasDefault"]</th>
+                                </Header>
+                                <Row>
+                                    @if (context.AliasId != _aliasid)
+                                    {
+                                        <td>
+                                            @if (_aliasid == -1)
+                                            {
+                                                <button type="button" class="btn btn-primary" @onclick="@(() => EditAlias(context))">@SharedLocalizer["Edit"]</button>
+                                            }
+                                        </td>
+                                        <td>
+                                            @if (_aliasid == -1)
+                                            {
+                                                <ActionDialog Action="Delete" OnClick="@(async () => await DeleteAlias(context))" ResourceKey="DeleteAlias" Class="btn btn-danger" Header="Delete Alias" Message="@string.Format(Localizer["Confirm.Alias.Delete", context.Name])" />
+                                            }
+                                        </td>
+                                        <td>@context.Name</td>
+                                        <td>@((context.IsDefault) ? SharedLocalizer["Yes"] : SharedLocalizer["No"])</td>
+                                    }
+                                    else
+                                    {
+                                        <td><button type="button" class="btn btn-success" @onclick="@(async () => await SaveAlias())">@SharedLocalizer["Save"]</button></td>
+                                        <td><button type="button" class="btn btn-secondary" @onclick="@(async () => await CancelAlias())">@SharedLocalizer["Cancel"]</button></td>
+                                        <td>
+                                            <input id="aliasname" class="form-control" @bind="@_aliasname" />
+                                        </td>
+                                        <td>
+                                            <select id="defaultalias" class="form-select" @bind="@_defaultalias" required>
+                                                <option value="True">@SharedLocalizer["Yes"]</option>
+                                                <option value="False">@SharedLocalizer["No"]</option>
+                                            </select>
+                                        </td>
+                                    }
+                                </Row>
+                            </Pager>
+                        </div>
+                    </div>
+                </div>
+            </Section>
             <Section Name="Hosting" Heading="Hosting Model" ResourceKey="Hosting">
                 <div class="container">
                     <div class="row mb-1 align-items-center">
@@ -376,7 +393,7 @@
             <Section Name="TenantInformation" Heading="Database" ResourceKey="TenantInformation">
                 <div class="container">
                     <div class="row mb-1 align-items-center">
-						<Label Class="col-sm-3" For="tenant" HelpText="The name of the database used for the site" ResourceKey="Tenant">Database: </Label>
+                        <Label Class="col-sm-3" For="tenant" HelpText="The name of the database used for the site. Note that this is not the physical database name but rather the tenant name which is used within the framework to identify a database." ResourceKey="Tenant">Database: </Label>
                         <div class="col-sm-9">
                             <input id="tenant" class="form-control" @bind="@_tenant" readonly />
                         </div>
@@ -388,9 +405,9 @@
                         </div>
                     </div>
                     <div class="row mb-1 align-items-center">
-                        <Label Class="col-sm-3" For="connectionstring" HelpText="The connection information for the database" ResourceKey="ConnectionString">Connection: </Label>
+                        <Label Class="col-sm-3" For="connectionstring" HelpText="The name of the connection string in appsettings.json which will be used to connect to the database" ResourceKey="ConnectionString">Connection: </Label>
                         <div class="col-sm-9">
-							<input id="connectionstring" class="form-control" @bind="@_connectionstring" readonly />
+                            <input id="connectionstring" class="form-control" @bind="@_connectionstring" readonly />
                         </div>
                     </div>
                 </div>
@@ -412,9 +429,11 @@
     private List<ThemeControl> _themes = new List<ThemeControl>();
     private List<ThemeControl> _containers = new List<ThemeControl>();
     private List<Page> _pages;
+    private List<Models.TimeZone> _timezones;
 
     private string _name = string.Empty;
     private string _homepageid = "-";
+    private string _timezoneid = string.Empty;
     private string _isdeleted;
     private string _sitemap = "";
     private string _siteguid = "";
@@ -427,11 +446,11 @@
     private string _themetype = "";
     private string _containertype = "";
     private string _admincontainertype = "";
+    private string _cookieconsent = "";
 
     private Dictionary<string, string> _textEditors = new Dictionary<string, string>();
     private string _textEditor = "";
-    private string _imageFiles = string.Empty;
-    private string _uploadableFiles = string.Empty;
+    private string _imagefiles = string.Empty;
 
     private string _headcontent = string.Empty;
     private string _bodycontent = string.Empty;
@@ -481,14 +500,21 @@
     {
         try
         {
+            if (PageState.QueryString.ContainsKey("updated"))
+            {
+                AddModuleMessage(Localizer["Success.Settings.SaveSite"], MessageType.Success);
+            }
+
             Site site = await SiteService.GetSiteAsync(PageState.Site.SiteId);
             if (site != null)
             {
+                _timezones = await TimeZoneService.GetTimeZonesAsync();
                 var settings = await SettingService.GetSiteSettingsAsync(site.SiteId);
 
                 _pages = await PageService.GetPagesAsync(PageState.Site.SiteId);
 
                 _name = site.Name;
+                _timezoneid = site.TimeZoneId;
                 if (site.HomePageId != null)
                 {
                     _homepageid = site.HomePageId.Value.ToString();
@@ -513,6 +539,7 @@
                 _containers = ThemeService.GetContainerControls(PageState.Site.Themes, _themetype);
                 _containertype = (!string.IsNullOrEmpty(site.DefaultContainerType)) ? site.DefaultContainerType : Constants.DefaultContainer;
                 _admincontainertype = (!string.IsNullOrEmpty(site.AdminContainerType)) ? site.AdminContainerType : Constants.DefaultAdminContainer;
+                _cookieconsent = SettingService.GetSetting(settings, "CookieConsent", string.Empty);
 
                 // functionality
                 var textEditors = ServiceProvider.GetServices<ITextEditor>();
@@ -521,10 +548,8 @@
                     _textEditors.Add(textEditor.Name, Utilities.GetFullTypeName(textEditor.GetType().AssemblyQualifiedName));
                 }
                 _textEditor = SettingService.GetSetting(settings, "TextEditor", Constants.DefaultTextEditor);
-                _imageFiles = SettingService.GetSetting(settings, "ImageFiles", Constants.ImageFiles);
-                _imageFiles = (string.IsNullOrEmpty(_imageFiles)) ? Constants.ImageFiles : _imageFiles;
-                _uploadableFiles = SettingService.GetSetting(settings, "UploadableFiles", Constants.UploadableFiles);
-                _uploadableFiles = (string.IsNullOrEmpty(_uploadableFiles)) ? Constants.UploadableFiles : _uploadableFiles;
+                _imagefiles = SettingService.GetSetting(settings, "ImageFiles", Constants.ImageFiles);
+                _imagefiles = (string.IsNullOrEmpty(_imagefiles)) ? Constants.ImageFiles : _imagefiles;
 
                 // page content
                 _headcontent = site.HeadContent;
@@ -571,7 +596,7 @@
                     if (tenant != null)
                     {
                         _tenant = tenant.Name;
-                        _database = _databases.Find(item => item.DBType == tenant.DBType)?.Name;
+                        _database = _databases.Find(item => item.DBType == tenant.DBType && item.Name != "LocalDB")?.Name;
                         _connectionstring = tenant.DBConnectionString;
                     }
                 }
@@ -642,6 +667,7 @@
                     if (site != null)
                     {
                         site.Name = _name;
+                        site.TimeZoneId = _timezoneid;
                         site.HomePageId = (_homepageid != "-" ? int.Parse(_homepageid) : null);
                         site.IsDeleted = (_isdeleted == null ? true : Boolean.Parse(_isdeleted));
 
@@ -727,16 +753,17 @@
                         settings = SettingService.SetSetting(settings, "SiteGuid", _siteguid, true);
                         settings = SettingService.SetSetting(settings, "NotificationRetention", _retention.ToString(), true);
 
+                        //cookie consent
+                        settings = SettingService.SetSetting(settings, "CookieConsent", _cookieconsent);
+
                         // functionality
                         settings = SettingService.SetSetting(settings, "TextEditor", _textEditor);
-                        settings = SettingService.SetSetting(settings, "ImageFiles", (_imageFiles != Constants.ImageFiles) ? _imageFiles.Replace(" ", "") : "", false);
-                        settings = SettingService.SetSetting(settings, "UploadableFiles", (_uploadableFiles != Constants.UploadableFiles) ? _uploadableFiles.Replace(" ", "") : "", false);
 
                         await SettingService.UpdateSiteSettingsAsync(settings, site.SiteId);
 
                         await logger.LogInformation("Site Settings Saved {Site}", site);
 
-                        NavigationManager.NavigateTo(NavigateUrl(), true); // reload
+                        NavigationManager.NavigateTo(NavigateUrl(PageState.Page.Path, "updated=true"), true); // reload
                     }
                 }
                 else
@@ -924,5 +951,10 @@
         _aliasid = -1;
         _aliasname = "";
         StateHasChanged();
+    }
+
+    private async Task EvictSitemapOutputCache() {
+        await CacheService.EvictByTag(Constants.SitemapOutputCacheTag);
+        AddModuleMessage(Localizer["Success.SiteMap.CacheEvicted"], MessageType.Success);
     }
 }

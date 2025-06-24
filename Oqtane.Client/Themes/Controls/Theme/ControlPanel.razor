@@ -9,7 +9,7 @@
     <LanguageSwitcher ButtonClass="@ButtonClass" DropdownAlignment="@LanguageDropdownAlignment" />
 }
 
-@if (_showEditMode || (PageState.Page.IsPersonalizable && PageState.User != null && UserSecurity.IsAuthorized(PageState.User, RoleNames.Registered)))
+@if (ShowEditMode && (_showEditMode || (PageState.Page.IsPersonalizable && PageState.User != null && UserSecurity.IsAuthorized(PageState.User, RoleNames.Registered))))
 {
     <form method="post" class="app-form-inline" @formname="EditModeForm" @onsubmit="@(async () => await ToggleEditMode(PageState.EditMode))" data-enhance>
         <input type="hidden" name="@Constants.RequestVerificationToken" value="@SiteState.AntiForgeryToken" />
@@ -59,9 +59,15 @@
     [Parameter]
     public string LanguageDropdownAlignment { get; set; } = string.Empty; // Empty or Left or Right
 
+    /// <summary>
+    /// Ability to hide the Edit Mode toggle button
+    /// </summary>
+    [Parameter]
+    public bool ShowEditMode { get; set; } = true;
+
     private PageState _pageState;
     private bool _canViewAdminDashboard = false;
-    private bool _showEditMode = false;
+    private bool _showEditMode = false; // internal state (not the same as ShowEditMode parameter)
 
     protected override void OnParametersSet()
     {
@@ -85,6 +91,7 @@
         }
 
         // trim PageState to mitigate page bloat caused by Blazor serializing/encrypting state when crossing render mode boundaries
+        // only include properties required by the ControlPanelInteractive component
         _pageState = new PageState
         {
             Alias = PageState.Alias,
@@ -125,6 +132,7 @@
         if (PageState.Page.IsPersonalizable && PageState.User != null && UserSecurity.IsAuthorized(PageState.User, RoleNames.Registered))
         {
             page = await PageService.AddPageAsync(PageState.Page.PageId, PageState.User.UserId);
+            PageState.EditMode = true;
         }
 
         if (_showEditMode)
@@ -134,8 +142,7 @@
             if (PageState.User != null) 
             {
                 // preserve edit mode for authenticated users
-                var userSettings = new Dictionary<string, string> { { "CP-editmode", (PageState.EditMode) ? PageState.Page.PageId.ToString() : "-1" } };
-                await SettingService.UpdateUserSettingsAsync(userSettings, PageState.User.UserId);
+                await SettingService.AddOrUpdateSettingAsync(EntityNames.User, PageState.User.UserId, "CP-editmode", (PageState.EditMode) ? PageState.Page.PageId.ToString() : "-1", false);
             }
 
             // preserve other querystring parameters
@@ -148,8 +155,7 @@
         {
             if (PageState.Page.IsPersonalizable && PageState.User != null && UserSecurity.IsAuthorized(PageState.User, RoleNames.Registered))
             {
-                PageState.EditMode = true;
-                NavigationManager.NavigateTo(NavigateUrl(page.Path, "edit=" + ((PageState.EditMode) ? "true" : "false")));
+                NavigationManager.NavigateTo(NavigateUrl(page.Path, "edit=" + PageState.EditMode.ToString().ToLower()));
             }
         }
     }

@@ -45,10 +45,25 @@ namespace Oqtane.Modules.Admin.Files.Manager
                         var path = folder.Path + file.Name;
 
                         var body = "";
-                        if (DocumentExtensions.Contains(Path.GetExtension(file.Name)))
+                        if (System.IO.File.Exists(_fileRepository.GetFilePath(file)))
                         {
-                            // get the contents of the file
-                            body = System.IO.File.ReadAllText(_fileRepository.GetFilePath(file));
+                            // only non-binary files can be indexed
+                            if (DocumentExtensions.Contains(Path.GetExtension(file.Name)))
+                            {
+                                // get the contents of the file
+                                try
+                                {
+                                    body = System.IO.File.ReadAllText(_fileRepository.GetFilePath(file));
+                                }
+                                catch
+                                {
+                                    // could not read the file
+                                }
+                            }
+                        }
+                        else
+                        {
+                            removed = true; // file does not exist on disk
                         }
 
                         var searchContent = new SearchContent
@@ -57,6 +72,7 @@ namespace Oqtane.Modules.Admin.Files.Manager
                             EntityName = EntityNames.File,
                             EntityId = file.FileId.ToString(),
                             Title = path,
+                            Description = "",
                             Body = body,
                             Url = $"{Constants.FileUrl}{folder.Path}{file.Name}",
                             Permissions = $"{EntityNames.Folder}:{folder.FolderId}",
